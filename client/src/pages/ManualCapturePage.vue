@@ -59,7 +59,14 @@ async function handleBuildDraft() {
 </script>
 
 <template>
-  <div class="grid grid-cols-1 gap-6 2xl:grid-cols-[420px_1fr]">
+  <div class="space-y-6">
+    <a-alert
+      type="info"
+      show-icon
+      message="浏览器预览环境下仅验证界面与流程；真实截图采集需在 Electron 桌面端中运行。"
+    />
+
+    <div class="grid grid-cols-1 gap-6 2xl:grid-cols-[380px_minmax(0,1fr)]">
     <a-card class="platform-card" title="截图任务">
       <div class="space-y-4">
         <a-alert
@@ -99,6 +106,7 @@ async function handleBuildDraft() {
           <a-timeline-item v-for="paragraph in draft" :key="paragraph" color="cyan">{{ paragraph }}</a-timeline-item>
         </a-timeline>
       </a-card>
+    </div>
     </div>
   </div>
 </template>

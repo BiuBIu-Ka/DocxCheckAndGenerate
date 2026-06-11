@@ -28,7 +28,14 @@ async function handleGenerate() {
 </script>
 
 <template>
-  <div class="grid grid-cols-1 gap-6 2xl:grid-cols-[420px_1fr]">
+  <div class="space-y-6">
+    <a-alert
+      type="info"
+      show-icon
+      message="当前生成内容为演示编排结果，便于验证前后端流程；接入真实模型后，可替换为实际知识检索与模型输出。"
+    />
+
+    <div class="grid grid-cols-1 gap-6 2xl:grid-cols-[380px_minmax(0,1fr)]">
     <a-card class="platform-card" title="生成指令">
       <a-form layout="vertical">
         <a-form-item label="文档类型">
@@ -71,5 +78,6 @@ async function handleGenerate() {
       </template>
       <a-empty v-else description="填写左侧生成参数后，这里会展示章节草稿与首轮审查摘要。" />
     </a-card>
+    </div>
   </div>
 </template>

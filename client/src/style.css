@@ -21,7 +21,6 @@
 
 body {
   margin: 0;
-  min-width: 1200px;
   min-height: 100vh;
   color: #e2e8f0;
   background:
@@ -39,16 +38,33 @@ body {
   border-right: 1px solid var(--line);
 }
 
+.layout-main-shell {
+  padding: 20px 24px;
+}
+
 .platform-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  height: 96px;
+  min-height: 96px;
+  height: auto;
   border: 1px solid var(--line);
   border-radius: 24px;
   background: rgba(7, 12, 24, 0.72);
   backdrop-filter: blur(18px);
+}
+
+.header-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.layout-content {
+  padding-top: 20px;
 }
 
 .platform-card.ant-card {
@@ -84,6 +100,7 @@ body {
   background:
     linear-gradient(180deg, rgba(6, 11, 25, 0.92), rgba(8, 13, 26, 0.72)),
     radial-gradient(circle at top left, color-mix(in srgb, var(--accent, var(--cyan)) 14%, transparent), transparent 45%);
+  min-height: 188px;
 }
 
 .hero-panel {
@@ -157,4 +174,90 @@ body {
 
 .ant-menu-dark .ant-menu-item-selected {
   background: linear-gradient(90deg, rgba(8, 145, 178, 0.32), rgba(59, 130, 246, 0.08));
+}
+
+.ant-alert {
+  border-radius: 18px;
+}
+
+@media (max-width: 1440px) {
+  .hero-title {
+    font-size: 34px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .layout-main-shell {
+    padding: 16px;
+  }
+
+  .platform-header {
+    gap: 16px;
+    padding: 18px 20px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-tags {
+    justify-content: flex-start;
+  }
+
+  .hero-panel {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+
+  .hero-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .layout-side-note {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    min-width: 0;
+  }
+
+  .layout-main-shell {
+    padding: 12px;
+  }
+
+  .platform-header {
+    border-radius: 20px;
+    padding: 16px;
+  }
+
+  .platform-card.ant-card {
+    border-radius: 20px;
+  }
+
+  .hero-panel {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .hero-title {
+    font-size: 28px;
+  }
+
+  .hero-copy {
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-chip {
+    min-height: 72px;
+  }
+
+  .metric-card {
+    min-height: auto;
+    padding: 20px;
+  }
 }

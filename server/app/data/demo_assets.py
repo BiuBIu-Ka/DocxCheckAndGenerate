@@ -21,24 +21,24 @@ TERMS = ["任务规划", "告警中心", "接口控制器", "审查批次", "术
 
 MODEL_PROVIDERS = [
     {
-        "provider": "Local-32B",
+        "provider": "本地 32B 主模型（示例）",
         "endpoint": "http://127.0.0.1:11434/v1",
         "model": "mil-doc-32b",
-        "status": "online",
+        "status": "mock",
         "default": True,
     },
     {
-        "provider": "Ollama",
+        "provider": "Ollama（示例接入）",
         "endpoint": "http://127.0.0.1:11434/v1",
         "model": "qwen2.5:14b",
-        "status": "online",
+        "status": "mock",
         "default": False,
     },
     {
-        "provider": "DeepSeek-Compatible",
+        "provider": "DeepSeek-Compatible（示例接入）",
         "endpoint": "http://127.0.0.1:8001/v1",
         "model": "deepseek-r1-distill",
-        "status": "standby",
+        "status": "mock",
         "default": False,
     },
 ]
