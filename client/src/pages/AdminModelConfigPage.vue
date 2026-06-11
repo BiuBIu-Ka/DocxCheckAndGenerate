@@ -1,93 +1,151 @@
+
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref, reactive } from 'vue'
 import { message } from 'ant-design-vue'
-import { fetchModelProviders } from '@/services/api'
-import type { ModelProvider } from '@/types/platform'
+import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
+import axios from 'axios'
 
-const providers = ref<ModelProvider[]>([])
+const providers = ref([])
 const loading = ref(false)
+const modalVisible = ref(false)
+const testLoading = ref(false)
 
-const columns = [
-  { title: '提供方', dataIndex: 'provider', key: 'provider' },
-  { title: '模型', dataIndex: 'model', key: 'model' },
-  { title: '接入地址 / 配置位置', dataIndex: 'endpoint', key: 'endpoint' },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 160 },
-  { title: '默认', dataIndex: 'default', key: 'default', width: 100 },
-]
+const formState = reactive({
+  name: '',
+  provider: 'openai',
+  base_url: 'https://api.deepseek.com',
+  api_key: '',
+  model_name: 'deepseek-chat',
+  is_default: false
+})
 
-const summaryCards = computed(() => ({
-  online: providers.value.filter((item) => item.status === 'online').length,
-  configured: providers.value.filter((item) => ['configured', 'installed'].includes(item.status)).length,
-  unavailable: providers.value.filter((item) => ['missing', 'not_configured'].includes(item.status)).length,
-}))
-
-function getStatusColor(status: string) {
-  if (status === 'online') return 'success'
-  if (status === 'installed' || status === 'configured') return 'processing'
-  if (status === 'missing') return 'error'
-  return 'default'
-}
-
-function getStatusLabel(status: string) {
-  if (status === 'online') return '已连通'
-  if (status === 'installed') return '已安装未就绪'
-  if (status === 'configured') return '已配置待验证'
-  if (status === 'missing') return '未安装'
-  if (status === 'not_configured') return '未配置'
-  return status
-}
-
-async function loadProviders() {
+async function loadConfigs() {
   loading.value = true
   try {
-    providers.value = await fetchModelProviders()
-  } catch (error) {
-    console.error(error)
-    message.error('模型状态拉取失败，请确认后端服务是否已启动。')
+    const { data } = await axios.get('/api/model-providers')
+    providers.value = data
+  } catch (e) {
+    message.error('加载配置失败')
   } finally {
     loading.value = false
   }
 }
 
-onMounted(loadProviders)
+async function handleAdd() {
+  try {
+    await axios.post('/api/model-providers', formState)
+    message.success('添加成功')
+    modalVisible.value = false
+    loadConfigs()
+  } catch (e) {
+    message.error('保存失败')
+  }
+}
+
+async function handleTest(id: number) {
+  testLoading.value = true
+  try {
+    const { data } = await axios.post(`/api/model-providers/test/${id}`)
+    if (data.success) {
+      message.success('连接成功！')
+    } else {
+      message.error('连接失败：' + data.error)
+    }
+  } catch (e) {
+    message.error('测试请求失败')
+  } finally {
+    testLoading.value = false
+  }
+}
+
+async function handleDelete(id: number) {
+  try {
+    await axios.delete(`/api/model-providers/${id}`)
+    message.success('已删除')
+    loadConfigs()
+  } catch (e) {
+    message.error('删除失败')
+  }
+}
+
+onMounted(loadConfigs)
 </script>
 
 <template>
   <div class="space-y-6">
-    <a-card class="platform-card" title="模型供应商真实状态" :loading="loading">
-      <a-alert
-        :type="summaryCards.online > 0 ? 'success' : 'warning'"
-        show-icon
-        :message="summaryCards.online > 0 ? '已探测到可直接调用的模型供应方。' : '当前未探测到在线模型服务，可安装 Ollama 或补充兼容接口配置。 '"
-        class="mb-5"
-      />
-      <div class="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-          <div class="text-sm text-slate-400">已连通</div>
-          <div class="mt-3 text-3xl font-semibold text-white">{{ summaryCards.online }}</div>
-          <div class="mt-2 text-sm leading-6 text-slate-300">可直接被平台调用的模型供应方数量。</div>
-        </div>
-        <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-          <div class="text-sm text-slate-400">已配置 / 已安装</div>
-          <div class="mt-3 text-3xl font-semibold text-white">{{ summaryCards.configured }}</div>
-          <div class="mt-2 text-sm leading-6 text-slate-300">具备接入基础条件，但仍需实际连通性验证。</div>
-        </div>
-        <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-          <div class="text-sm text-slate-400">未就绪</div>
-          <div class="mt-3 text-3xl font-semibold text-white">{{ summaryCards.unavailable }}</div>
-          <div class="mt-2 text-sm leading-6 text-slate-300">尚未安装或尚未配置的模型供应方数量。</div>
-        </div>
-      </div>
-      <a-table :columns="columns" :data-source="providers" :pagination="false" row-key="provider" class="platform-table">
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'status'">
-            <a-tag :color="getStatusColor(record.status)">{{ getStatusLabel(record.status) }}</a-tag>
-          </template>
-          <template v-else-if="column.key === 'default'">
-            <a-badge :status="record.default ? 'success' : 'default'" :text="record.default ? '是' : '否'" />
-          </template>
+    <div class="flex justify-between items-center">
+      <h2 class="text-2xl font-bold">模型配置中心</h2>
+      <a-button type="primary" @click="modalVisible = true">
+        <template #icon><PlusOutlined /></template>
+        添加新模型
+      </a-button>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <a-card v-for="item in providers" :key="item.id" class="shadow-sm hover:shadow-md transition-shadow">
+        <template #title>
+          <div class="flex items-center gap-2">
+            <span class="font-bold">{{ item.name }}</span>
+            <a-tag v-if="item.is_default" color="blue">默认</a-tag>
+          </div>
         </template>
-      </a-table>
-    </a-card>
+        <template #extra>
+          <a-button type="link" danger @click="handleDelete(item.id)">
+            <template #icon><DeleteOutlined /></template>
+          </a-button>
+        </template>
+
+        <div class="space-y-3">
+          <div class="flex justify-between">
+            <span class="text-gray-500">供应商:</span>
+            <span>{{ item.provider }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">模型:</span>
+            <span>{{ item.model_name }}</span>
+          </div>
+          <div class="flex justify-between truncate">
+            <span class="text-gray-500">端点:</span>
+            <span class="truncate ml-4">{{ item.base_url }}</span>
+          </div>
+          
+          <div class="pt-4 border-t flex justify-between items-center">
+            <div class="flex items-center gap-1">
+               <CheckCircleOutlined v-if="item.last_status === 'online'" class="text-green-500" />
+               <ExclamationCircleOutlined v-else class="text-gray-300" />
+               <span class="text-xs text-gray-400">最后检测: 刚才</span>
+            </div>
+            <a-button size="small" :loading="testLoading" @click="handleTest(item.id)">测试连接</a-button>
+          </div>
+        </div>
+      </a-card>
+    </div>
+
+    <a-modal v-model:open="modalVisible" title="添加模型供应方" @ok="handleAdd">
+      <a-form layout="vertical">
+        <a-form-item label="配置名称">
+          <a-input v-model:value="formState.name" placeholder="例如：DeepSeek官方" />
+        </a-form-item>
+        <a-form-item label="供应商">
+          <a-select v-model:value="formState.provider">
+            <a-select-option value="openai">OpenAI</a-select-option>
+            <a-select-option value="deepseek">DeepSeek</a-select-option>
+            <a-select-option value="ollama">Ollama</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="Base URL">
+          <a-input v-model:value="formState.base_url" placeholder="https://api.openai.com/v1" />
+        </a-form-item>
+        <a-form-item label="API Key">
+          <a-input-password v-model:value="formState.api_key" placeholder="sk-..." />
+        </a-form-item>
+        <a-form-item label="模型名称">
+          <a-input v-model:value="formState.model_name" placeholder="gpt-4o / deepseek-chat" />
+        </a-form-item>
+        <a-form-item>
+          <a-checkbox v-model:checked="formState.is_default">设为默认模型</a-checkbox>
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>

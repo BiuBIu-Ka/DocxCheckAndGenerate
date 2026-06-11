@@ -1,263 +1,68 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
-  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  --bg-main: #050816;
-  --bg-panel: rgba(9, 14, 30, 0.85);
-  --bg-panel-soft: rgba(15, 23, 42, 0.72);
-  --line: rgba(83, 111, 166, 0.28);
-  --cyan: #22d3ee;
-  --violet: #8b5cf6;
+  color-scheme: light;
+  font-family: 'Inter', 'Noto Sans SC', sans-serif;
+  --bg-main: #f0f2f5;
+  --bg-card: #ffffff;
+  --primary-color: #1677ff;
+  --text-main: #262626;
+  --text-secondary: #595959;
+  --border-color: #f0f0f0;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
-  color: #e2e8f0;
-  background:
-    radial-gradient(circle at top left, rgba(34, 211, 238, 0.16), transparent 32%),
-    radial-gradient(circle at top right, rgba(139, 92, 246, 0.18), transparent 30%),
-    linear-gradient(180deg, #040712 0%, #080d1f 40%, #03060d 100%);
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
 }
 
-#app {
-  min-height: 100vh;
+.ant-layout {
+  background: transparent !important;
 }
 
-.platform-sider.ant-layout-sider {
-  background: linear-gradient(180deg, rgba(5, 10, 23, 0.96), rgba(8, 15, 30, 0.92));
-  border-right: 1px solid var(--line);
+.ant-layout-sider {
+  background: #001529 !important; /* Dark sidebar is professional */
+  box-shadow: 2px 0 8px rgba(0,0,0,0.15);
 }
 
-.layout-main-shell {
-  padding: 20px 24px;
-}
-
-.platform-header {
+.ant-layout-header {
+  background: #fff !important;
+  padding: 0 24px !important;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  min-height: 96px;
-  height: auto;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: rgba(7, 12, 24, 0.72);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
 
-.header-tags {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-}
-
-.layout-content {
-  padding-top: 20px;
-}
-
-.platform-card.ant-card {
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  overflow: hidden;
-  background: var(--bg-panel);
-  box-shadow: 0 20px 60px rgba(2, 6, 23, 0.24);
-}
-
-.platform-card .ant-card-head {
-  border-bottom-color: rgba(56, 189, 248, 0.12);
-}
-
-.platform-card .ant-card-head-title,
-.platform-card .ant-statistic,
-.platform-card .ant-statistic-content,
-.platform-card .ant-statistic-content-value {
-  color: #f8fafc;
-}
-
-.platform-table .ant-table,
-.platform-table .ant-table-container,
-.platform-table .ant-table-cell {
-  background: transparent !important;
-  color: #dbe7ff;
-}
-
-.metric-card {
-  border: 1px solid rgba(71, 85, 105, 0.4);
-  border-radius: 24px;
+.content-card {
+  background: var(--bg-card);
+  border-radius: 8px;
   padding: 24px;
-  background:
-    linear-gradient(180deg, rgba(6, 11, 25, 0.92), rgba(8, 13, 26, 0.72)),
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent, var(--cyan)) 14%, transparent), transparent 45%);
-  min-height: 188px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  border: 1px solid var(--border-color);
 }
 
-.hero-panel {
-  display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
-  gap: 24px;
-  padding: 32px;
-  border: 1px solid rgba(56, 189, 248, 0.18);
-  border-radius: 28px;
-  background:
-    linear-gradient(135deg, rgba(7, 17, 31, 0.98), rgba(12, 22, 42, 0.84)),
-    radial-gradient(circle at top left, rgba(34, 211, 238, 0.16), transparent 26%),
-    radial-gradient(circle at bottom right, rgba(139, 92, 246, 0.22), transparent 24%);
+.hero-section {
+  background: linear-gradient(90deg, #1677ff 0%, #4096ff 100%);
+  color: white;
+  padding: 40px;
+  border-radius: 12px;
+  margin-bottom: 24px;
 }
 
 .hero-title {
-  margin: 12px 0 0;
-  max-width: 900px;
-  font-size: 40px;
-  line-height: 1.2;
-  color: #f8fafc;
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 12px;
 }
 
-.hero-copy {
-  margin-top: 18px;
-  max-width: 760px;
-  font-size: 15px;
-  line-height: 1.9;
-  color: #94a3b8;
-}
-
-.badge-line {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid rgba(34, 211, 238, 0.24);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 12px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: #67e8f9;
-  background: rgba(6, 18, 28, 0.72);
-}
-
-.hero-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  align-content: center;
-}
-
-.hero-chip {
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 22px;
-  padding: 18px;
-  min-height: 92px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  background: rgba(15, 23, 42, 0.7);
-  color: #dbeafe;
-}
-
-.ant-menu-dark,
-.ant-menu-dark .ant-menu-sub,
-.ant-menu.ant-menu-dark {
-  background: transparent;
-}
-
-.ant-menu-dark .ant-menu-item-selected {
-  background: linear-gradient(90deg, rgba(8, 145, 178, 0.32), rgba(59, 130, 246, 0.08));
-}
-
-.ant-alert {
-  border-radius: 18px;
-}
-
-@media (max-width: 1440px) {
-  .hero-title {
-    font-size: 34px;
-  }
-}
-
-@media (max-width: 1200px) {
-  .layout-main-shell {
-    padding: 16px;
-  }
-
-  .platform-header {
-    gap: 16px;
-    padding: 18px 20px;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .header-tags {
-    justify-content: flex-start;
-  }
-
-  .hero-panel {
-    grid-template-columns: 1fr;
-    padding: 24px;
-  }
-
-  .hero-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .layout-side-note {
-    display: none;
-  }
-}
-
-@media (max-width: 768px) {
-  body {
-    min-width: 0;
-  }
-
-  .layout-main-shell {
-    padding: 12px;
-  }
-
-  .platform-header {
-    border-radius: 20px;
-    padding: 16px;
-  }
-
-  .platform-card.ant-card {
-    border-radius: 20px;
-  }
-
-  .hero-panel {
-    padding: 20px;
-    border-radius: 22px;
-  }
-
-  .hero-title {
-    font-size: 28px;
-  }
-
-  .hero-copy {
-    font-size: 14px;
-    line-height: 1.8;
-  }
-
-  .hero-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .hero-chip {
-    min-height: 72px;
-  }
-
-  .metric-card {
-    min-height: auto;
-    padding: 20px;
-  }
+.hero-desc {
+  font-size: 16px;
+  opacity: 0.9;
 }
