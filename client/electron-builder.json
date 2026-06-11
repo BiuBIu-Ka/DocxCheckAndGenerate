@@ -1,0 +1,15 @@
+{
+  "appId": "mil.sandbox.gjb-doc-platform",
+  "productName": "军工软件文档智能编制与审查平台",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*"
+  ],
+  "linux": {
+    "target": ["AppImage"],
+    "category": "Utility"
+  }
+}

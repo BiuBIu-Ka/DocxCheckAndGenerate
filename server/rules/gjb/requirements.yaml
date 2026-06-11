@@ -1,0 +1,5 @@
+required_sections:
+  - "1. 范围"
+  - "2. 引用文件"
+forbidden_terms:
+  - "随便"

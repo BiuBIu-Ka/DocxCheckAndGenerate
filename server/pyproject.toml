@@ -1,0 +1,17 @@
+[project]
+name = "gjb-doc-platform-server"
+version = "0.1.0"
+description = "军工软件文档智能编制与审查平台后端服务"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+  "pydantic>=2.8.0",
+  "python-multipart>=0.0.9"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

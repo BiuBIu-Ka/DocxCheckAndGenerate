@@ -2,7 +2,7 @@
 
 ## 一、Summary
 
-本计划面向“基于大模型与GJB规则引擎的军工软件文档智能编制与审查平台”完整项目实现，目标是在涉密本地部署场景下，建设一套以 Web 平台为主、覆盖文档生成、文档审查、整改闭环、知识沉淀与审计管理的端到端系统。
+本计划面向“基于大模型与GJB规则引擎的军工软件文档智能编制与审查平台”完整项目实现，目标是在涉密本地部署场景下，建设一套以 Electron 桌面端为主、Vue 为前端技术栈、覆盖文档生成、文档审查、整改闭环、知识沉淀与审计管理的端到端系统。
 
 本次规划按以下已确认决策展开：
 
@@ -11,7 +11,8 @@
 - 部署约束：本地涉密部署。
 - 首版重点：优先落地“生成 + 审查闭环”。
 - 文档范围：首版即覆盖全类型文档，包括需求规格说明书、设计说明书、测试说明书、电子交互手册/用户手册、审查记录等。
-- 使用形态：Web 平台为主。
+- 使用形态：Electron 桌面应用为主，内嵌 Vue 前端界面。
+- 前端技术：Vue 3 + TypeScript + Ant Design Vue。
 - 验收导向：既可竞赛演示，也具备工程可交付性。
 - 规则体系：GJB 审查规则采用配置化规则库。
 - 模型路线：单 32B 主模型 + 工具链，支持可配置模型接入，兼容 Ollama / OpenAI 兼容接口 / DeepSeek 等。
@@ -49,12 +50,13 @@
 
 ### 3.2 核心设计决策
 
-- 采用 B/S 架构，以 Web 门户承载主要交互。
+- 采用“Electron 桌面壳 + Vue 前端 + 本地/内网后端服务”的混合架构，兼顾桌面工具调用能力与统一业务界面。
 - 采用“主模型 + 规则引擎 + 知识检索 + 文档解析工具链”的组合方案，而非纯大模型方案。
 - 采用模型网关抽象，默认接入本地主模型，同时支持兼容式模型切换。
 - GJB 规则按“文档类型 -> 章节结构 -> 格式规范 -> 术语规范 -> 图表规范 -> 一致性规范 -> 审查建议模板”进行配置化组织。
 - 采用“生成即审查、审查可整改、整改可复核”的闭环流程。
-- 首版优先覆盖文档生成与审查主链路，二期再强化自动截图、UML/流程图自动生成、跨版本对比等增强能力。
+- Electron 主进程负责截图、文件系统访问、系统级能力调用，渲染进程负责业务交互界面。
+- 首版优先覆盖文档生成与审查主链路，并同步纳入“截图上传 + 桌面截图采集”基础能力；二期再强化自动截图编排、UML/流程图自动生成、跨版本对比等增强能力。
 
 ### 3.3 非目标约束
 
@@ -105,20 +107,50 @@
 
 ---
 
-### 4.2 前端 Web 平台
+### 4.2 Electron 桌面端与 Vue 前端
 
-#### 4. `/workspace/web/package.json`
+#### 4. `/workspace/client/package.json`
 
 用途：
-- 前端工程清单与依赖定义。
+- Electron 客户端工程清单与依赖定义。
 
 原因：
-- Web 平台是主要使用形态，需要独立前端工程。
+- 当前已明确桌面端为主要使用形态，需要把界面层和系统能力层统一纳入客户端工程。
 
 实现方式：
-- 建议采用 React + TypeScript + Vite + 组件库。
+- 建议采用 Electron + Vue 3 + TypeScript + Vite + Ant Design Vue。
 
-#### 5. `/workspace/web/src/pages/DocumentGeneratePage.tsx`
+#### 5. `/workspace/client/electron/main.ts`
+
+用途：
+- Electron 主进程入口。
+
+核心功能：
+- 创建主窗口；
+- 管理本地配置；
+- 调用截图、文件系统、导出、系统对话框等桌面能力；
+- 与后端服务建立本地通信。
+
+#### 6. `/workspace/client/electron/preload.ts`
+
+用途：
+- 预加载脚本，向渲染进程暴露安全受控的桌面 API。
+
+核心功能：
+- 暴露截图接口；
+- 暴露本地文件选择与导出接口；
+- 暴露系统路径、任务通知、日志接口；
+- 严格隔离 Node 能力，避免渲染进程直接高权限访问。
+
+#### 7. `/workspace/client/src/main.ts`
+
+用途：
+- Vue 应用入口。
+
+实现方式：
+- 注册路由、状态管理、Ant Design Vue 组件、全局主题与 API 客户端。
+
+#### 8. `/workspace/client/src/pages/DocumentGeneratePage.vue`
 
 用途：
 - 文档生成页面。
@@ -135,9 +167,9 @@
 - 生成是首版核心链路之一，且要与审查打通。
 
 实现方式：
-- 前端表单 + 分步引导 + 流式生成结果展示。
+- Vue 表单 + 分步引导 + 流式生成结果展示。
 
-#### 6. `/workspace/web/src/pages/DocumentReviewPage.tsx`
+#### 9. `/workspace/client/src/pages/DocumentReviewPage.vue`
 
 用途：
 - 文档审查与问题管理页面。
@@ -149,7 +181,7 @@
 - 查看定位与整改建议；
 - 提交复核状态。
 
-#### 7. `/workspace/web/src/pages/KnowledgeBasePage.tsx`
+#### 10. `/workspace/client/src/pages/KnowledgeBasePage.vue`
 
 用途：
 - 知识底座管理页面。
@@ -157,7 +189,7 @@
 核心功能：
 - 管理 GJB 规则、模板、术语库、历史文档、审查意见库。
 
-#### 8. `/workspace/web/src/pages/AdminModelConfigPage.tsx`
+#### 11. `/workspace/client/src/pages/AdminModelConfigPage.vue`
 
 用途：
 - 模型与工具链配置页面。
@@ -165,6 +197,36 @@
 核心功能：
 - 配置主模型地址、模型类型、API Key 占位、超参、启停策略；
 - 配置 OCR、向量库、对象存储、审查任务阈值。
+
+#### 12. `/workspace/client/src/pages/ManualCapturePage.vue`
+
+用途：
+- 用户手册截图采集与步骤编排页面。
+
+核心功能：
+- 发起桌面截图；
+- 选择截图区域或导入已有截图；
+- 维护步骤顺序、标题和界面元素说明；
+- 一键生成手册初稿。
+
+#### 13. `/workspace/client/src/components/IssueTable.vue`
+
+用途：
+- 基于 Ant Design Vue 的问题清单表格组件。
+
+核心功能：
+- 严重级别筛选；
+- 规则来源展示；
+- 问题定位预览；
+- 整改状态更新。
+
+#### 14. `/workspace/client/src/composables/useDesktopBridge.ts`
+
+用途：
+- 对 Electron 预加载 API 进行 Vue 组合式封装。
+
+原因：
+- 统一管理截图、导入、导出、本地路径、通知等桌面能力调用，降低页面层耦合。
 
 ---
 
@@ -445,7 +507,7 @@
 - 本地部署编排。
 
 包含服务：
-- Web；
+- Client 构建产物服务；
 - Server；
 - PostgreSQL；
 - 向量库；
@@ -453,17 +515,36 @@
 - 可选 OCR 服务；
 - 可选模型代理服务。
 
-#### 38. `/workspace/deploy/nginx.conf`
+#### 38. `/workspace/client/electron/services/screenshot_service.ts`
 
 用途：
-- 前后端代理与静态资源服务。
+- Electron 主进程侧截图服务。
 
-#### 39. `/workspace/deploy/scripts/init_knowledge_base.py`
+核心能力：
+- 调用桌面捕获能力；
+- 支持全屏、窗口、区域截图；
+- 存储截图元数据并返回给渲染进程；
+- 为用户手册生成提供可靠截图输入。
+
+#### 39. `/workspace/client/electron-builder.json`
+
+用途：
+- Electron 客户端打包配置。
+
+原因：
+- 涉密本地部署场景下，需要生成可安装的桌面应用交付包。
+
+#### 40. `/workspace/deploy/nginx.conf`
+
+用途：
+- 后端 API 与内网代理配置。
+
+#### 41. `/workspace/deploy/scripts/init_knowledge_base.py`
 
 用途：
 - 初始化默认规则、模板、术语库和演示数据。
 
-#### 40. `/workspace/deploy/scripts/import_history_assets.py`
+#### 42. `/workspace/deploy/scripts/import_history_assets.py`
 
 用途：
 - 导入历史文档与审查意见。
@@ -472,27 +553,32 @@
 
 ### 4.9 测试与验收
 
-#### 41. `/workspace/server/tests/test_rule_engine.py`
+#### 43. `/workspace/server/tests/test_rule_engine.py`
 
 目标：
 - 验证 GJB 规则加载、规则匹配和问题输出结构正确。
 
-#### 42. `/workspace/server/tests/test_generation_review_flow.py`
+#### 44. `/workspace/server/tests/test_generation_review_flow.py`
 
 目标：
 - 验证“生成 -> 自动审查 -> 问题清单输出”的闭环链路。
 
-#### 43. `/workspace/server/tests/test_consistency_checker.py`
+#### 45. `/workspace/server/tests/test_consistency_checker.py`
 
 目标：
 - 验证跨章节/跨文档一致性检查。
 
-#### 44. `/workspace/web/src/pages/__tests__/review-page.test.tsx`
+#### 46. `/workspace/client/src/pages/__tests__/review-page.test.ts`
 
 目标：
-- 验证问题展示、筛选、整改状态更新的核心交互。
+- 验证 Vue + Ant Design Vue 审查页面中的问题展示、筛选、整改状态更新等核心交互。
 
-#### 45. `/workspace/docs/acceptance/mvp-checklist.md`
+#### 47. `/workspace/client/electron/__tests__/screenshot-service.test.ts`
+
+目标：
+- 验证桌面截图服务的参数校验、结果落盘和错误处理逻辑。
+
+#### 48. `/workspace/docs/acceptance/mvp-checklist.md`
 
 目标：
 - 固化首版验收项与演示路径。
@@ -538,12 +624,13 @@
 #### F. 用户手册能力
 
 - 支持上传截图批量生成步骤说明。
+- 支持通过 Electron 客户端调用桌面截图能力采集手册素材。
 - 支持按章节结构生成用户手册初稿。
 - 支持统一术语和界面要素命名。
 
 ### 5.2 二期增强功能
 
-- 自动驱动软件界面采集截图并生成手册。
+- 自动驱动目标软件界面完成步骤执行、截图采集并生成手册。
 - 自动生成 UML 类图、流程图、时序图草稿。
 - 支持更细粒度工作流审批。
 - 支持更多安全审计与密级管理策略。
@@ -558,7 +645,8 @@
 建议采用五层架构：
 
 1. 表现层
-- Web 前端；
+- Electron 客户端；
+- Vue 业务前端；
 - 审查结果可视化；
 - 配置与管理后台。
 
@@ -592,7 +680,25 @@
 - 任务队列；
 - 日志/审计。
 
-### 6.2 关键数据流
+### 6.2 客户端分层
+
+- 主进程：
+  - 窗口管理；
+  - 桌面截图；
+  - 本地文件系统；
+  - 安装包升级；
+  - 本地配置读写。
+- 预加载层：
+  - 受控暴露桌面 API；
+  - IPC 参数校验；
+  - 桥接前端与主进程。
+- 渲染层：
+  - Vue 页面；
+  - Ant Design Vue 组件；
+  - 业务状态管理；
+  - 后端 API 调用。
+
+### 6.3 关键数据流
 
 #### 生成链路
 
@@ -612,7 +718,15 @@
 5. 一致性检查器执行跨文档/跨章节核验。
 6. 聚合问题清单并生成审查报告。
 
-### 6.3 模型接入方案
+#### 截图与手册链路
+
+1. 用户在 Electron 客户端发起截图任务。
+2. 主进程调用桌面截图服务完成全屏、窗口或区域采集。
+3. 截图文件与元数据传递给渲染层并上传到后端。
+4. 手册生成模块结合截图顺序、界面元素标注与术语库生成操作说明。
+5. 用户在客户端中修订后导出手册。
+
+### 6.4 模型接入方案
 
 - 默认使用本地 32B 主模型。
 - 通过模型网关兼容：
@@ -628,7 +742,7 @@
   - 错误信息；
   - 模型版本。
 
-### 6.4 规则引擎方案
+### 6.5 规则引擎方案
 
 - 规则采用 YAML/JSON 配置化存储。
 - 支持规则版本管理。
@@ -656,12 +770,13 @@
 ### Phase 1：基础工程与底座搭建（2 周）
 
 目标：
-- 初始化前后端工程；
+- 初始化 Electron 客户端、Vue 前端与后端工程；
 - 搭建数据库、对象存储、向量库；
-- 建立模型网关、配置中心、登录框架、日志框架。
+- 建立模型网关、配置中心、登录框架、日志框架；
+- 打通主进程、预加载层、渲染层基础通信。
 
 交付：
-- 可运行 Web + API 基础骨架；
+- 可运行 Electron Client + API 基础骨架；
 - 模型接入配置；
 - 基础部署脚本；
 - 基础数据模型。
@@ -708,7 +823,7 @@
 
 目标：
 - 完成需求/设计/测试一致性检查；
-- 完成截图说明生成与用户手册初稿生成。
+- 完成 Electron 截图能力、截图说明生成与用户手册初稿生成。
 
 交付：
 - 一致性检查模块；
@@ -750,6 +865,7 @@
 ### 8.2 工程验收
 
 - 支持本地部署与离线运行。
+- 支持打包为可安装的 Electron 客户端。
 - 模型接入可切换，不与单一供应方绑定。
 - 规则库可配置，可独立更新。
 - 审查流程具有审计日志。
@@ -792,6 +908,13 @@
 - 首版先聚焦术语、模块名、接口名、编号映射；
 - 后续逐步扩展到需求-设计-测试追踪矩阵。
 
+### 风险 5：Electron 客户端权限边界处理不当
+
+应对：
+- 使用 preload 暴露受控 API，禁用渲染进程直接访问 Node 高权限能力；
+- 对截图、文件读写、导出等操作增加白名单与参数校验；
+- 关键桌面操作记录审计日志。
+
 ---
 
 ## 十、Verification Steps
@@ -799,7 +922,7 @@
 后续执行阶段按以下顺序验证：
 
 1. 基础环境验证
-- 前后端工程可启动；
+- Electron 客户端、前后端工程可启动；
 - 数据库、对象存储、向量库、模型网关连接成功。
 
 2. 知识底座验证
@@ -824,7 +947,7 @@
 
 6. 一致性与手册验证
 - 可检查至少一个项目下多份文档的一致性；
-- 可基于截图生成手册段落和操作步骤。
+- 可通过 Electron 采集截图并生成手册段落和操作步骤。
 
 7. 演示验证
 - 能完成 10 分钟内稳定演示；

@@ -1,0 +1,5 @@
+required_sections:
+  - "1. 测试范围"
+  - "2. 测试环境"
+forbidden_terms:
+  - "大概通过"

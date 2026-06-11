@@ -1,0 +1,5 @@
+required_sections:
+  - "1. 系统概述"
+  - "2. 模块设计"
+forbidden_terms:
+  - "临时方案"
