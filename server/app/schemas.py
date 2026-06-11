@@ -68,6 +68,51 @@ class ModelProviderResponse(BaseModel):
     default: bool
 
 
+class RuntimeVersionInfo(BaseModel):
+    node: str
+    npm: str
+    python: str
+    git: str
+
+
+class RuntimeServiceStatus(BaseModel):
+    name: str
+    status: str
+    detail: str
+
+
+class EnvironmentStatusResponse(BaseModel):
+    platform: str
+    workspace: str
+    branch: str
+    commit: str
+    versions: RuntimeVersionInfo
+    services: list[RuntimeServiceStatus]
+
+
+class CodeStatusResponse(BaseModel):
+    branch: str
+    commit: str
+    dirty: bool
+    changed_files: int = Field(alias='changedFiles')
+    untracked_files: int = Field(alias='untrackedFiles')
+    client_pages: int = Field(alias='clientPages')
+    client_components: int = Field(alias='clientComponents')
+    server_routes: int = Field(alias='serverRoutes')
+    server_tests: int = Field(alias='serverTests')
+
+    model_config = {"populate_by_name": True}
+
+
+class EnvironmentSummaryResponse(BaseModel):
+    environment: EnvironmentStatusResponse
+    code: CodeStatusResponse
+    model_providers: list[ModelProviderResponse] = Field(alias='modelProviders')
+    knowledge_assets: list[KnowledgeAssetSummary] = Field(alias='knowledgeAssets')
+
+    model_config = {"populate_by_name": True}
+
+
 class ManualDraftRequest(BaseModel):
     screenshots: list[str]
     target_audience: str = Field(alias="targetAudience")

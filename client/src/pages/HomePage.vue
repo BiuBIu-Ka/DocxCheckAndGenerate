@@ -1,63 +1,85 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { message } from 'ant-design-vue'
 import MetricCard from '@/components/MetricCard.vue'
+import { fetchStatusSummary } from '@/services/api'
+import type { StatusSummary } from '@/types/platform'
 
-const metrics = [
-  {
-    title: '当前阶段',
-    value: 'MVP 演示版',
-    description: '已完成生成、审查、知识底座与手册草稿的最小闭环，当前页面指标为演示桩数据。',
-    accent: '#22d3ee',
-  },
-  {
-    title: '模型接入方式',
-    value: '可配置兼容',
-    description: '支持本地模型、Ollama、DeepSeek 或 OpenAI 兼容接口，但当前列表仅为示例配置展示。',
-    accent: '#a78bfa',
-  },
-  {
-    title: '当前界面重点',
-    value: '清晰可演示',
-    description: '优先突出任务入口、状态概览和操作链路，避免把真实接入能力与示例数据混淆。',
-    accent: '#34d399',
-  },
-]
+const loading = ref(false)
+const summary = ref<StatusSummary | null>(null)
 
-const timelines = [
-  '导入规范、模板、术语与历史文档，形成知识底座。',
-  '按模板生成需求、设计、测试或手册文档草稿。',
-  '规则引擎与模型协同审查，输出问题清单与修改建议。',
-  '在桌面端完成截图采集、手册段落生成与结果导出。',
-]
+const metrics = computed(() => {
+  if (!summary.value) return []
 
-const facts = [
-  { label: '数据来源', value: '当前为前后端演示桩数据，不代表真实项目库内容。' },
-  { label: '模型状态', value: '模型页展示的是可接入形态示例，不表示本机已成功连接 Ollama。' },
-  { label: '适用场景', value: '面向军工软件文档编制、GJB 审查和电子手册编制的一体化桌面平台。' },
-]
+  const onlineProviders = summary.value.modelProviders.filter((item) => item.status === 'online').length
+  return [
+    {
+      title: '代码工作区',
+      value: summary.value.code.dirty ? '存在变更' : '干净',
+      description: `分支 ${summary.value.code.branch} · 提交 ${summary.value.code.commit}`,
+      accent: '#22d3ee',
+    },
+    {
+      title: '运行环境',
+      value: `${summary.value.environment.versions.node} / ${summary.value.environment.versions.python}`,
+      description: `Node 与 Python 版本由后端实时探测，工作区为 ${summary.value.environment.workspace}`,
+      accent: '#a78bfa',
+    },
+    {
+      title: '模型在线数',
+      value: String(onlineProviders),
+      description: onlineProviders > 0 ? '至少存在一个可直接调用的模型供应方。' : '当前未探测到在线模型服务。',
+      accent: '#34d399',
+    },
+  ]
+})
+
+const serviceStatusText = {
+  ready: '已就绪',
+  missing: '缺失',
+  online: '在线',
+  installed: '已安装未就绪',
+  configured: '已配置',
+  not_configured: '未配置',
+}
+
+const serviceStatusColor = {
+  ready: 'success',
+  missing: 'error',
+  online: 'success',
+  installed: 'processing',
+  configured: 'processing',
+  not_configured: 'default',
+}
+
+onMounted(async () => {
+  loading.value = true
+  try {
+    summary.value = await fetchStatusSummary()
+  } catch (error) {
+    console.error(error)
+    message.error('状态拉取失败，请确认后端服务是否已启动。')
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <template>
   <div class="space-y-6">
     <section class="hero-panel">
       <div>
-        <div class="badge-line">军工软件 · 文档工程 · 智能审查</div>
-        <h1 class="hero-title">让 GJB 约束从人工经验，变成可执行、可追踪、可复核的数字规则。</h1>
+        <div class="badge-line">军工软件 · 文档工程 · 真实状态面板</div>
+        <h1 class="hero-title">当前界面展示的是实际环境、代码仓库与模型接入状态，不再使用首页演示指标。</h1>
         <p class="hero-copy">
-          平台以 Electron 桌面端为作业入口，统一承载文档生成、规则审查、知识底座、截图手册和模型配置能力。
+          系统实时读取当前工作区分支、提交、文件统计、运行时版本和本机模型接入可用性，便于你直接判断当前代码是否可测、环境是否可用。
         </p>
-        <div class="mt-6 max-w-3xl">
-          <a-alert
-            type="warning"
-            show-icon
-            message="当前首页指标、知识数量、模型供应商状态均为演示数据，用于说明平台能力结构，不代表已连通真实模型或真实项目资产。"
-          />
-        </div>
       </div>
       <div class="hero-grid">
-        <div class="hero-chip">需求规格说明书</div>
-        <div class="hero-chip">设计说明书</div>
-        <div class="hero-chip">测试说明书</div>
-        <div class="hero-chip">电子交互手册</div>
+        <div class="hero-chip">分支与提交</div>
+        <div class="hero-chip">Node / Python 版本</div>
+        <div class="hero-chip">模型接入探测</div>
+        <div class="hero-chip">规则与测试资产</div>
       </div>
     </section>
 
@@ -65,20 +87,68 @@ const facts = [
       <MetricCard v-for="item in metrics" :key="item.title" v-bind="item" />
     </section>
 
-    <section class="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-      <a-card class="platform-card" title="首版能力闭环">
-        <a-timeline>
-          <a-timeline-item v-for="step in timelines" :key="step" color="cyan">{{ step }}</a-timeline-item>
-        </a-timeline>
+    <section class="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <a-card class="platform-card" title="环境状态" :loading="loading">
+        <template v-if="summary">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+              <div class="text-sm text-slate-400">平台</div>
+              <div class="mt-2 text-base font-medium text-white">{{ summary.environment.platform }}</div>
+              <div class="mt-3 text-sm text-slate-400">工作区</div>
+              <div class="mt-1 break-all text-sm text-slate-200">{{ summary.environment.workspace }}</div>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+              <div class="text-sm text-slate-400">版本信息</div>
+              <div class="mt-3 space-y-2 text-sm text-slate-200">
+                <div>Node：{{ summary.environment.versions.node }}</div>
+                <div>NPM：{{ summary.environment.versions.npm }}</div>
+                <div>Python：{{ summary.environment.versions.python }}</div>
+                <div>Git：{{ summary.environment.versions.git }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div v-for="service in summary.environment.services" :key="service.name" class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-sm text-slate-300">{{ service.name }}</div>
+                <a-tag :color="serviceStatusColor[service.status as keyof typeof serviceStatusColor] || 'default'">
+                  {{ serviceStatusText[service.status as keyof typeof serviceStatusText] || service.status }}
+                </a-tag>
+              </div>
+              <div class="mt-3 break-all text-xs leading-6 text-slate-500">{{ service.detail }}</div>
+            </div>
+          </div>
+        </template>
       </a-card>
 
-      <a-card class="platform-card" title="当前说明">
-        <div class="space-y-4">
-          <div v-for="item in facts" :key="item.label" class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <div class="text-sm text-slate-400">{{ item.label }}</div>
-            <div class="mt-2 text-sm leading-7 text-slate-200">{{ item.value }}</div>
+      <a-card class="platform-card" title="代码状态" :loading="loading">
+        <template v-if="summary">
+          <div class="space-y-4">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+              <div class="text-sm text-slate-400">工作树状态</div>
+              <div class="mt-2 text-2xl font-semibold text-white">{{ summary.code.dirty ? '存在未提交改动' : '工作树干净' }}</div>
+              <div class="mt-2 text-sm text-slate-300">变更文件 {{ summary.code.changedFiles }} 个，未跟踪文件 {{ summary.code.untrackedFiles }} 个</div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <div class="text-sm text-slate-400">前端页面</div>
+                <div class="mt-2 text-2xl font-semibold text-white">{{ summary.code.clientPages }}</div>
+              </div>
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <div class="text-sm text-slate-400">前端组件</div>
+                <div class="mt-2 text-2xl font-semibold text-white">{{ summary.code.clientComponents }}</div>
+              </div>
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <div class="text-sm text-slate-400">后端路由</div>
+                <div class="mt-2 text-2xl font-semibold text-white">{{ summary.code.serverRoutes }}</div>
+              </div>
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <div class="text-sm text-slate-400">自动化测试</div>
+                <div class="mt-2 text-2xl font-semibold text-white">{{ summary.code.serverTests }}</div>
+              </div>
+            </div>
           </div>
-        </div>
+        </template>
       </a-card>
     </section>
   </div>

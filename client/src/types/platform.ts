@@ -39,6 +39,47 @@ export type ModelProvider = {
   default: boolean
 }
 
+export type RuntimeVersionInfo = {
+  node: string
+  npm: string
+  python: string
+  git: string
+}
+
+export type RuntimeServiceStatus = {
+  name: string
+  status: string
+  detail: string
+}
+
+export type EnvironmentStatus = {
+  platform: string
+  workspace: string
+  branch: string
+  commit: string
+  versions: RuntimeVersionInfo
+  services: RuntimeServiceStatus[]
+}
+
+export type CodeStatus = {
+  branch: string
+  commit: string
+  dirty: boolean
+  changedFiles: number
+  untrackedFiles: number
+  clientPages: number
+  clientComponents: number
+  serverRoutes: number
+  serverTests: number
+}
+
+export type StatusSummary = {
+  environment: EnvironmentStatus
+  code: CodeStatus
+  modelProviders: ModelProvider[]
+  knowledgeAssets: Array<{ category: string; count: number; description: string }>
+}
+
 export type ScreenshotResult = {
   filePath: string
   width: number

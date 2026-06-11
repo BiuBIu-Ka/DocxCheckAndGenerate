@@ -1,5 +1,11 @@
 import axios from 'axios'
-import type { GenerationResponse, KnowledgeSummary, ModelProvider, ReviewResponse } from '@/types/platform'
+import type {
+  GenerationResponse,
+  KnowledgeSummary,
+  ModelProvider,
+  ReviewResponse,
+  StatusSummary,
+} from '@/types/platform'
 
 type GeneratePayload = {
   documentType: string
@@ -51,6 +57,10 @@ export async function fetchKnowledgeSummary() {
 
 export async function fetchModelProviders() {
   return request<ModelProvider[]>({ method: 'get', url: '/model-providers' })
+}
+
+export async function fetchStatusSummary() {
+  return request<StatusSummary>({ method: 'get', url: '/status/summary' })
 }
 
 export async function buildManualDraft(payload: { screenshots: string[]; targetAudience: string; targetModule: string }) {

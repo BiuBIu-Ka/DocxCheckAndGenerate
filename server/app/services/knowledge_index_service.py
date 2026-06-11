@@ -1,12 +1,12 @@
-from app.data.demo_assets import KNOWLEDGE_ASSETS
-from app.schemas import KnowledgeAssetSummary, KnowledgeSummaryResponse
+from app.schemas import KnowledgeSummaryResponse
+from app.services.runtime_status_service import runtime_status_service
 from app.services.term_service import term_service
 
 
 class KnowledgeIndexService:
     def summary(self) -> KnowledgeSummaryResponse:
         return KnowledgeSummaryResponse(
-            assets=[KnowledgeAssetSummary(**item) for item in KNOWLEDGE_ASSETS],
+            assets=runtime_status_service.knowledge_assets(),
             hotTerms=term_service.hot_terms(),
         )
 

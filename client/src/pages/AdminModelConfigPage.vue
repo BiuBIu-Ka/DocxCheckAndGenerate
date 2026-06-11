@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { message } from 'ant-design-vue'
 import { fetchModelProviders } from '@/services/api'
 import type { ModelProvider } from '@/types/platform'
 
@@ -9,69 +10,84 @@ const loading = ref(false)
 const columns = [
   { title: '提供方', dataIndex: 'provider', key: 'provider' },
   { title: '模型', dataIndex: 'model', key: 'model' },
-  { title: '接入地址', dataIndex: 'endpoint', key: 'endpoint' },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 140 },
+  { title: '接入地址 / 配置位置', dataIndex: 'endpoint', key: 'endpoint' },
+  { title: '状态', dataIndex: 'status', key: 'status', width: 160 },
   { title: '默认', dataIndex: 'default', key: 'default', width: 100 },
 ]
 
+const summaryCards = computed(() => ({
+  online: providers.value.filter((item) => item.status === 'online').length,
+  configured: providers.value.filter((item) => ['configured', 'installed'].includes(item.status)).length,
+  unavailable: providers.value.filter((item) => ['missing', 'not_configured'].includes(item.status)).length,
+}))
+
 function getStatusColor(status: string) {
   if (status === 'online') return 'success'
-  if (status === 'mock') return 'processing'
-  return 'warning'
+  if (status === 'installed' || status === 'configured') return 'processing'
+  if (status === 'missing') return 'error'
+  return 'default'
 }
 
 function getStatusLabel(status: string) {
   if (status === 'online') return '已连通'
-  if (status === 'mock') return '示例配置'
-  return '待接入'
+  if (status === 'installed') return '已安装未就绪'
+  if (status === 'configured') return '已配置待验证'
+  if (status === 'missing') return '未安装'
+  if (status === 'not_configured') return '未配置'
+  return status
 }
 
-onMounted(async () => {
+async function loadProviders() {
   loading.value = true
   try {
     providers.value = await fetchModelProviders()
+  } catch (error) {
+    console.error(error)
+    message.error('模型状态拉取失败，请确认后端服务是否已启动。')
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadProviders)
 </script>
 
 <template>
   <div class="space-y-6">
-    <a-card class="platform-card" title="模型供应商配置" :loading="loading">
+    <a-card class="platform-card" title="模型供应商真实状态" :loading="loading">
       <a-alert
-        type="warning"
+        :type="summaryCards.online > 0 ? 'success' : 'warning'"
         show-icon
-        message="当前列表来自后端示例配置，用于展示平台支持的模型接入形态；这不代表本机已经实际连通 Ollama 或其他模型服务。"
+        :message="summaryCards.online > 0 ? '已探测到可直接调用的模型供应方。' : '当前未探测到在线模型服务，可安装 Ollama 或补充兼容接口配置。 '"
         class="mb-5"
       />
       <div class="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-          <div class="text-sm text-slate-400">当前模式</div>
-          <div class="mt-3 text-2xl font-semibold text-white">示例配置展示</div>
-          <div class="mt-2 text-sm leading-6 text-slate-300">用于说明模型网关支持的接入协议和后续扩展方式。</div>
+          <div class="text-sm text-slate-400">已连通</div>
+          <div class="mt-3 text-3xl font-semibold text-white">{{ summaryCards.online }}</div>
+          <div class="mt-2 text-sm leading-6 text-slate-300">可直接被平台调用的模型供应方数量。</div>
         </div>
         <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-          <div class="text-sm text-slate-400">推荐接入路径</div>
-          <div class="mt-3 text-2xl font-semibold text-white">统一模型网关</div>
-          <div class="mt-2 text-sm leading-6 text-slate-300">通过一层 Provider 抽象切换本地主模型、Ollama 和兼容 API。</div>
+          <div class="text-sm text-slate-400">已配置 / 已安装</div>
+          <div class="mt-3 text-3xl font-semibold text-white">{{ summaryCards.configured }}</div>
+          <div class="mt-2 text-sm leading-6 text-slate-300">具备接入基础条件，但仍需实际连通性验证。</div>
         </div>
         <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-          <div class="text-sm text-slate-400">下一步</div>
-          <div class="mt-3 text-2xl font-semibold text-white">接入真实探测</div>
-          <div class="mt-2 text-sm leading-6 text-slate-300">后续可增加健康检查、鉴权校验、延迟测试和默认模型切换。</div>
+          <div class="text-sm text-slate-400">未就绪</div>
+          <div class="mt-3 text-3xl font-semibold text-white">{{ summaryCards.unavailable }}</div>
+          <div class="mt-2 text-sm leading-6 text-slate-300">尚未安装或尚未配置的模型供应方数量。</div>
         </div>
       </div>
       <a-table :columns="columns" :data-source="providers" :pagination="false" row-key="provider" class="platform-table">
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'status'">
-          <a-tag :color="getStatusColor(record.status)">{{ getStatusLabel(record.status) }}</a-tag>
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'status'">
+            <a-tag :color="getStatusColor(record.status)">{{ getStatusLabel(record.status) }}</a-tag>
+          </template>
+          <template v-else-if="column.key === 'default'">
+            <a-badge :status="record.default ? 'success' : 'default'" :text="record.default ? '是' : '否'" />
+          </template>
         </template>
-        <template v-else-if="column.key === 'default'">
-          <a-badge :status="record.default ? 'success' : 'default'" :text="record.default ? '是' : '否'" />
-        </template>
-      </template>
-    </a-table>
+      </a-table>
     </a-card>
   </div>
 </template>

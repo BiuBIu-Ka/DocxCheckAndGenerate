@@ -1,10 +1,10 @@
-from app.data.demo_assets import MODEL_PROVIDERS
 from app.schemas import ModelProviderResponse
+from app.services.runtime_status_service import runtime_status_service
 
 
 class ModelGateway:
     def list_providers(self) -> list[ModelProviderResponse]:
-        return [ModelProviderResponse(**item) for item in MODEL_PROVIDERS]
+        return runtime_status_service.list_model_providers()
 
     def draft_paragraph(self, title: str, context: list[str]) -> str:
         summary = "；".join(context[:2])
