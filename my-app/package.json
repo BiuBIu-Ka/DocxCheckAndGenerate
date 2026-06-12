@@ -1,0 +1,36 @@
+{
+  "name": "my-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "docxtemplater": "^3.68.7",
+    "electron-store": "^11.0.2",
+    "element-plus": "^2.14.2",
+    "lucide-vue-next": "^1.0.0",
+    "openai": "^6.42.0",
+    "pizzip": "^3.2.0",
+    "vue": "^3.5.34",
+    "vue-router": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "@vue/tsconfig": "^0.9.1",
+    "docx": "^9.7.1",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12",
+    "vite-plugin-electron": "^1.0.4",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "vue-tsc": "^3.2.8"
+  }
+}
