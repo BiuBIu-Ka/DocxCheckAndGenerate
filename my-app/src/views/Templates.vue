@@ -85,6 +85,15 @@ const extractVariables = async (buffer: ArrayBuffer) => {
     
     // Attempt to extract tags
     const text = doc.getFullText()
+    
+    // 语法兼容性提示
+    if (text.includes('{%') || text.includes('{{')) {
+      ElMessage.warning({
+        message: '检测到 Jinja2 语法 (如 {% for %})，本系统使用 docxtemplater 引擎，请修改为 {#loop} 语法！',
+        duration: 5000
+      })
+    }
+
     // docxtemplater tags format is {tag} or {#loop} {/loop}
     const regex = /\{([a-zA-Z0-9_#\/]+)\}/g
     const matches = new Set<string>()
@@ -93,6 +102,12 @@ const extractVariables = async (buffer: ArrayBuffer) => {
       matches.add(match[1])
     }
     templateVariables.value = Array.from(matches)
+    
+    if (templateVariables.value.length === 0) {
+      ElMessage.warning('未在模板中解析到合法变量，请确认变量被单大括号 {} 包裹。')
+    } else {
+      ElMessage.success('模板解析成功！')
+    }
   } catch (error: any) {
     console.error('Error extracting variables', error)
     ElMessage.error('无法解析模板文件中的变量')
