@@ -18,6 +18,8 @@ const docId = route.params.id
 const document = ref<any>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
+const uploadLoading = ref(false)
+const uploadError = ref('')
 const parsedStructure = ref([])
 const activeTab = ref('content')
 
@@ -63,18 +65,26 @@ function stopPolling() {
 }
 
 async function handleUploadTemplate(info: any) {
+  uploadLoading.value = true
+  uploadError.value = ''
   const formData = new FormData()
   formData.append('file', info.file)
   try {
     const { data } = await axios.post('/api/documents/parse-template', formData)
     parsedStructure.value = data.structure
-    // Auto save the structure
-    await axios.put(`/api/documents/${docId}`, {
-      structure_json: JSON.stringify(data.structure)
+    const { data: updated } = await axios.put(`/api/documents/${docId}`, {
+      structureJson: JSON.stringify(data.structure)
     })
+    document.value = updated
+    info.onSuccess?.(data, info.file)
     message.success('模板解析成功，章节结构已同步')
-  } catch (e) {
-    message.error('模板解析失败')
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || e?.message || '模板解析失败'
+    uploadError.value = detail
+    info.onError?.(e)
+    message.error(detail)
+  } finally {
+    uploadLoading.value = false
   }
 }
 
@@ -192,11 +202,13 @@ onUnmounted(stopPolling)
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
       <div class="lg:col-span-1 space-y-6">
         <a-card title="模板结构解析" size="small">
-          <a-upload-dragger :multiple="false" :customRequest="handleUploadTemplate" class="mb-4">
+          <a-upload-dragger accept=".docx" :multiple="false" :show-upload-list="false" :customRequest="handleUploadTemplate" class="mb-4">
             <template #icon><UploadOutlined /></template>
             <p class="ant-upload-text">点击或拖拽 Word 模板到此处</p>
-            <p class="ant-upload-hint text-xs">系统将自动解析 Heading 样式并提取章节树</p>
+            <p class="ant-upload-hint text-xs">仅支持 `.docx`，系统将自动解析 Heading 样式并提取章节树</p>
           </a-upload-dragger>
+          <a-alert v-if="uploadLoading" type="info" show-icon message="正在解析模板，请稍候..." class="mb-3" />
+          <a-alert v-else-if="uploadError" :message="uploadError" type="error" show-icon class="mb-3" />
           <div v-if="parsedStructure.length" class="space-y-1">
             <div class="text-xs font-bold mb-2 text-gray-500">解析出的章节预览：</div>
             <div v-for="s in parsedStructure" :key="s.title" class="text-xs p-2 bg-blue-50 rounded text-blue-700 border border-blue-100 truncate">

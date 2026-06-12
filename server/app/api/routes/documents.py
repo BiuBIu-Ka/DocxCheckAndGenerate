@@ -7,8 +7,10 @@ from app.db.models import Document
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentSchema
 from app.services.docx_parser import docx_parser
 from typing import List
+from pathlib import Path
 import shutil
 import os
+import tempfile
 
 router = APIRouter()
 
@@ -56,12 +58,28 @@ async def delete_document(id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/parse-template")
 async def parse_template(file: UploadFile = File(...)):
-    temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix != ".docx":
+        raise HTTPException(status_code=400, detail="模板解析仅支持 .docx 文件，请上传 Word 模板。")
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    temp_path = temp_file.name
+    try:
+        with temp_file as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as exc:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise HTTPException(status_code=500, detail=f"模板文件保存失败: {exc}") from exc
+
     try:
         structure = docx_parser.parse_structure(temp_path)
         return {"structure": structure}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"模板解析失败，请确认文件是有效的 Word .docx 模板: {exc}") from exc
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
