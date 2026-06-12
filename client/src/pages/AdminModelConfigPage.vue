@@ -23,7 +23,7 @@ const testLoading = ref(false)
 const formState = reactive({
   name: '',
   provider: 'openai',
-  base_url: 'https://api.deepseek.com',
+  base_url: 'https://api.deepseek.com/v1',
   api_key: '',
   model_name: 'deepseek-chat',
   is_default: false
@@ -46,9 +46,17 @@ async function handleAdd() {
     await axios.post('/api/model-providers', formState)
     message.success('添加成功')
     modalVisible.value = false
+    Object.assign(formState, {
+      name: '',
+      provider: 'openai',
+      base_url: 'https://api.deepseek.com/v1',
+      api_key: '',
+      model_name: 'deepseek-chat',
+      is_default: false
+    })
     loadConfigs()
-  } catch (e) {
-    message.error('保存失败')
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -59,10 +67,10 @@ async function handleTest(id: number) {
     if (data.success) {
       message.success('连接成功！')
     } else {
-      message.error('连接失败：' + data.error)
+      message.error('连接失败：' + (data.error || '未知错误'))
     }
-  } catch (e) {
-    message.error('测试请求失败')
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '测试请求失败')
   } finally {
     testLoading.value = false
   }

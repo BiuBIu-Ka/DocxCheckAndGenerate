@@ -1,13 +1,48 @@
 
 import httpx
-import json
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
+
+
+def normalize_base_url(base_url: str, provider: Optional[str] = None) -> str:
+    value = (base_url or "").strip()
+    provider_name = (provider or "").strip().lower()
+
+    if not value:
+        defaults = {
+            "deepseek": "https://api.deepseek.com/v1",
+            "openai": "https://api.openai.com/v1",
+            "ollama": "http://127.0.0.1:11434/v1",
+        }
+        return defaults.get(provider_name, "")
+
+    if value.startswith("sk-"):
+        defaults = {
+            "deepseek": "https://api.deepseek.com/v1",
+            "openai": "https://api.openai.com/v1",
+            "ollama": "http://127.0.0.1:11434/v1",
+        }
+        return defaults.get(provider_name, value)
+
+    if not value.startswith(("http://", "https://")):
+        if value.startswith(("127.0.0.1", "localhost")):
+            value = f"http://{value}"
+        else:
+            value = f"https://{value}"
+
+    parsed = urlparse(value)
+    path = parsed.path.rstrip("/")
+    if provider_name in {"deepseek", "openai", "ollama"} and path == "":
+        value = value.rstrip("/") + "/v1"
+
+    return value.rstrip("/")
 
 class LLMClient:
-    def __init__(self, base_url: str, api_key: str, model_name: str):
-        self.base_url = base_url.rstrip('/')
-        self.api_key = api_key
-        self.model_name = model_name
+    def __init__(self, base_url: str, api_key: str, model_name: str, provider: Optional[str] = None):
+        self.base_url = normalize_base_url(base_url, provider)
+        self.api_key = (api_key or "").strip()
+        self.model_name = (model_name or "").strip()
+        self.provider = (provider or "").strip().lower()
 
     async def chat_completion(self, messages: List[Dict[str, str]], stream: bool = False) -> str:
         headers = {
@@ -31,15 +66,19 @@ class LLMClient:
             result = response.json()
             return result['choices'][0]['message']['content']
 
-    async def test_connection(self) -> bool:
+    async def test_connection(self) -> tuple[bool, Optional[str]]:
         try:
-            # Send a simple hello to test connectivity
+            if not self.base_url.startswith(("http://", "https://")):
+                return False, "模型地址不是合法的 HTTP 地址。"
+            if not self.model_name:
+                return False, "模型名称不能为空。"
+
             messages = [{"role": "user", "content": "hi"}]
             await self.chat_completion(messages)
-            return True
+            return True, None
         except Exception as e:
             print(f"Connection test failed: {e}")
-            return False
+            return False, str(e)
 
 # Model Manager to handle dynamic switching
 from sqlalchemy.future import select
@@ -59,7 +98,7 @@ class ModelManager:
                 config = result.scalars().first()
             
             if config:
-                return LLMClient(config.base_url, config.api_key, config.model_name)
+                return LLMClient(config.base_url, config.api_key, config.model_name, config.provider)
             return None
 
 model_manager = ModelManager()
