@@ -44,7 +44,7 @@ class GenerationOrchestrator:
             ]
         )
 
-    async def generate_and_save(self, document_id: int, prompt: str, structure: list):
+    async def generate_and_save(self, document_id: int, prompt: str, structure: list, source_context: str = ""):
         async with AsyncSessionLocal() as session:
             doc = await session.get(Document, document_id)
             if not doc:
@@ -65,7 +65,8 @@ class GenerationOrchestrator:
                     f"请作为军工软件专家，为项目【{doc.project_name}】编写【{doc.doc_type}】模板下的章节：{title}。\n"
                     f"要求：符合GJB 438B规范，并严格遵守模板章节要求与术语要求。\n"
                     f"{knowledge_prompt}\n"
-                    f"编制背景：{prompt}"
+                    f"编制背景与用户要求：{prompt}\n"
+                    f"参考资料如下，可用于生成需求规格说明书、设计说明书等正式文档：\n{source_context or '无额外参考资料'}"
                 )
 
                 try:

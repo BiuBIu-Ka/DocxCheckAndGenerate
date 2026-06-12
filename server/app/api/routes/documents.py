@@ -1,5 +1,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db.database import get_db
@@ -12,6 +14,7 @@ import shutil
 import os
 import tempfile
 import json
+from docx import Document as DocxDocument
 
 router = APIRouter()
 
@@ -107,6 +110,44 @@ async def delete_document(id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(db_doc)
     await db.commit()
     return {"success": True}
+
+
+@router.get("/{id}/export-docx")
+async def export_document_docx(id: int, db: AsyncSession = Depends(get_db)):
+    db_doc = await db.get(Document, id)
+    if not db_doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not db_doc.content_json:
+        raise HTTPException(status_code=400, detail="当前模板尚未生成文档内容，无法导出。")
+
+    try:
+        content_map = json.loads(db_doc.content_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="文档内容损坏，无法导出。") from exc
+
+    export_doc = DocxDocument()
+    export_doc.add_heading(db_doc.title, 0)
+    export_doc.add_paragraph(f"项目：{db_doc.project_name}")
+    export_doc.add_paragraph(f"文档类型：{db_doc.doc_type}")
+    if db_doc.generation_prompt:
+        export_doc.add_paragraph(f"生成要求：{db_doc.generation_prompt}")
+
+    for title, body in content_map.items():
+        export_doc.add_heading(str(title), level=1)
+        for paragraph in str(body).splitlines() or [""]:
+            export_doc.add_paragraph(paragraph)
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+    temp_path = temp_file.name
+    temp_file.close()
+    export_doc.save(temp_path)
+    download_name = f"{db_doc.title or 'generated-document'}.docx"
+    return FileResponse(
+        temp_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=download_name,
+        background=BackgroundTask(lambda: Path(temp_path).unlink(missing_ok=True)),
+    )
 
 
 @router.post("/{id}/sync-knowledge", response_model=DocumentSchema)

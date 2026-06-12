@@ -45,6 +45,8 @@ class Document(Base):
     structure_json = Column(Text)  # JSON string of parsed structure
     rules_json = Column(Text)  # JSON string of template-scoped rules
     terms_json = Column(Text)  # JSON string of template-scoped terms
+    generation_prompt = Column(Text)
+    generation_sources_json = Column(Text)
     content_json = Column(Text)  # JSON string of sections
     review_score = Column(Integer)
     review_summary = Column(Text)

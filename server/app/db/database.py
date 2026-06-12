@@ -27,6 +27,8 @@ async def ensure_sqlite_schema() -> None:
             "template_html": "TEXT",
             "rules_json": "TEXT",
             "terms_json": "TEXT",
+            "generation_prompt": "TEXT",
+            "generation_sources_json": "TEXT",
         }
         for column_name, column_type in required_columns.items():
             if column_name not in document_columns:

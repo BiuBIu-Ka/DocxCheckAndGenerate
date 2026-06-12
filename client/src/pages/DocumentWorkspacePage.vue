@@ -1,6 +1,6 @@
 
 <script setup lang="ts">
-import { onMounted, ref, onUnmounted, nextTick, watch } from 'vue'
+import { onMounted, ref, onUnmounted, nextTick, watch, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { 
@@ -12,7 +12,8 @@ import {
   DownOutlined,
   PlusOutlined,
   SyncOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  DownloadOutlined
 } from '@ant-design/icons-vue'
 import axios from 'axios'
 
@@ -46,6 +47,8 @@ interface TemplateDocument {
   structureJson?: string | null
   rulesJson?: string | null
   termsJson?: string | null
+  generationPrompt?: string | null
+  generationSourcesJson?: string | null
   contentJson?: string | null
   issuesJson?: string | null
   reviewScore?: number | null
@@ -54,7 +57,7 @@ interface TemplateDocument {
 
 const route = useRoute()
 const docId = route.params.id
-const document = ref<TemplateDocument | null>(null)
+const templateDocument = ref<TemplateDocument | null>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
 const uploadLoading = ref(false)
@@ -65,6 +68,11 @@ const templateRules = ref<TemplateRule[]>([])
 const templateTerms = ref<TemplateTerm[]>([])
 const templateHtml = ref('')
 const templateEditor = ref<HTMLElement | null>(null)
+const generationModalVisible = ref(false)
+const generationFileList = ref<any[]>([])
+const generationForm = reactive({
+  prompt: '',
+})
 
 let pollTimer: any = null
 
@@ -115,12 +123,17 @@ function handleTemplateHtmlInput(event: Event) {
   templateHtml.value = (event.target as HTMLElement).innerHTML
 }
 
+function handleGenerationFileChange(info: any) {
+  generationFileList.value = info.fileList || []
+}
+
 async function loadDocument() {
   loading.value = true
   try {
     const { data } = await axios.get(`/api/documents/${docId}`)
-    document.value = data
+    templateDocument.value = data
     templateHtml.value = data.templateHtml || ''
+    generationForm.prompt = data.generationPrompt || ''
     parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
     templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
     templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
@@ -142,8 +155,9 @@ function startPolling() {
   pollTimer = setInterval(async () => {
     try {
       const { data } = await axios.get(`/api/documents/${docId}`)
-      document.value = data
+      templateDocument.value = data
       templateHtml.value = data.templateHtml || ''
+      generationForm.prompt = data.generationPrompt || generationForm.prompt
       parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
       templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
       templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
@@ -180,7 +194,7 @@ async function handleUploadTemplate(info: any) {
       templateHtml: data.html || '',
       templateFileName: data.templateFileName
     })
-    document.value = updated
+    templateDocument.value = updated
     await syncTemplateEditor()
     info.onSuccess?.(data, info.file)
     message.success('模板已替换并解析完成')
@@ -194,22 +208,48 @@ async function handleUploadTemplate(info: any) {
   }
 }
 
-async function handleGenerate() {
-  if (!parsedStructure.value.length) {
-    message.warning('请先上传模板以识别章节结构')
+function openGenerateModal() {
+  generationModalVisible.value = true
+}
+
+async function handleGenerateSubmit() {
+  const derivedStructure = parsedStructure.value.length ? parsedStructure.value : buildStructureFromHtml(templateHtml.value)
+  if (!derivedStructure.length) {
+    message.warning('请先上传或维护模板内容')
     return
   }
+  if (!generationForm.prompt.trim()) {
+    message.warning('请填写本次生成的具体要求')
+    return
+  }
+
   actionLoading.value = true
   try {
-    await axios.post('/api/generation/trigger', {
-      document_id: Number(docId),
-      prompt: '基于GJB要求编制',
-      structure: parsedStructure.value
+    const formData = new FormData()
+    formData.append('document_id', String(docId))
+    formData.append('prompt', generationForm.prompt)
+    formData.append('structure_json', JSON.stringify(derivedStructure))
+    generationFileList.value.forEach((item) => {
+      const file = item.originFileObj || item
+      if (file) {
+        formData.append('files', file)
+      }
     })
+
+    await axios.put(`/api/documents/${docId}`, {
+      generationPrompt: generationForm.prompt,
+      structureJson: JSON.stringify(derivedStructure),
+      templateHtml: templateHtml.value,
+    })
+
+    await axios.post('/api/generation/trigger-with-context', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    generationModalVisible.value = false
     message.info('AI 生成任务已启动，请稍候...')
     loadDocument()
-  } catch (e) {
-    message.error('任务启动失败')
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '任务启动失败')
   } finally {
     actionLoading.value = false
   }
@@ -228,17 +268,37 @@ async function handleReview() {
   }
 }
 
+async function handleExportDocx() {
+  try {
+    const response = await axios.get(`/api/documents/${docId}/export-docx`, {
+      responseType: 'blob',
+    })
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${templateDocument.value?.title || 'generated-document'}.docx`
+    link.click()
+    window.URL.revokeObjectURL(url)
+    message.success('文档已导出为 docx')
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '导出失败')
+  }
+}
+
 async function handleSave() {
   try {
     const derivedStructure = buildStructureFromHtml(templateHtml.value)
     parsedStructure.value = derivedStructure
     await axios.put(`/api/documents/${docId}`, {
-      contentJson: document.value?.contentJson ?? null,
+      contentJson: templateDocument.value?.contentJson ?? null,
       templateHtml: templateHtml.value,
       structureJson: JSON.stringify(derivedStructure),
       rulesJson: JSON.stringify(templateRules.value),
       termsJson: JSON.stringify(templateTerms.value),
-      templateFileName: document.value?.templateFileName ?? null
+      templateFileName: templateDocument.value?.templateFileName ?? null
     })
     message.success('模板已成功保存')
   } catch (e) {
@@ -250,7 +310,7 @@ async function handleSyncKnowledge() {
   actionLoading.value = true
   try {
     const { data } = await axios.post(`/api/documents/${docId}/sync-knowledge`)
-    document.value = data
+    templateDocument.value = data
     templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
     templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
     message.success('已同步全局知识库到当前模板')
@@ -288,18 +348,18 @@ function removeTerm(index: number) {
 }
 
 const getContent = () => {
-  if (!document.value?.contentJson) return {}
+  if (!templateDocument.value?.contentJson) return {}
   try {
-    return JSON.parse(document.value.contentJson)
+    return JSON.parse(templateDocument.value.contentJson)
   } catch {
     return {}
   }
 }
 
 const getIssues = () => {
-  if (!document.value?.issuesJson) return []
+  if (!templateDocument.value?.issuesJson) return []
   try {
-    return JSON.parse(document.value.issuesJson)
+    return JSON.parse(templateDocument.value.issuesJson)
   } catch {
     return []
   }
@@ -326,25 +386,26 @@ watch(activeTab, async (tab) => {
 </script>
 
 <template>
-  <div v-if="document" class="space-y-6">
+  <div v-if="templateDocument" class="space-y-6">
     <div class="flex justify-between items-center bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
       <div>
         <div class="flex items-center gap-3">
-          <h2 class="text-2xl font-bold m-0">{{ document.title }} <span class="text-gray-400 font-normal">(模板)</span></h2>
-          <a-tag :color="document.status === 'completed' ? 'success' : 'processing'">
-            {{ getStatusLabel(document.status) }}
+          <h2 class="text-2xl font-bold m-0">{{ templateDocument.title }} <span class="text-gray-400 font-normal">(模板)</span></h2>
+          <a-tag :color="templateDocument.status === 'completed' ? 'success' : 'processing'">
+            {{ getStatusLabel(templateDocument.status) }}
           </a-tag>
         </div>
-        <div class="text-gray-500 mt-1">适用项目：{{ document.projectName }} · 类型：{{ document.docType }}</div>
-        <div v-if="document.templateFileName" class="text-xs text-gray-400 mt-1">源模板文件：{{ document.templateFileName }}</div>
+        <div class="text-gray-500 mt-1">适用项目：{{ templateDocument.projectName }} · 类型：{{ templateDocument.docType }}</div>
+        <div v-if="templateDocument.templateFileName" class="text-xs text-gray-400 mt-1">源模板文件：{{ templateDocument.templateFileName }}</div>
       </div>
       <div class="flex gap-3">
         <a-button @click="handleSave"><template #icon><SaveOutlined /></template>保存模板</a-button>
         <a-button :loading="actionLoading" @click="handleSyncKnowledge"><template #icon><SyncOutlined /></template>同步全局知识库</a-button>
+        <a-button v-if="Object.keys(getContent()).length" @click="handleExportDocx"><template #icon><DownloadOutlined /></template>导出 docx</a-button>
         <a-dropdown>
           <template #overlay>
             <a-menu>
-              <a-menu-item key="gen" @click="handleGenerate">
+              <a-menu-item key="gen" @click="openGenerateModal">
                 <RocketOutlined /> 基于此模板生成文档
               </a-menu-item>
               <a-menu-item key="rev" @click="handleReview">
@@ -378,16 +439,16 @@ watch(activeTab, async (tab) => {
           <a-empty v-else description="请上传 .docx 模板文件" />
         </a-card>
 
-        <a-card v-if="document.reviewScore !== null" title="质量概览" size="small">
-          <a-statistic title="审查评分" :value="document.reviewScore" suffix="/ 100" />
-          <div class="mt-4 text-xs text-gray-500">{{ document.reviewSummary }}</div>
+        <a-card v-if="templateDocument.reviewScore !== null" title="质量概览" size="small">
+          <a-statistic title="审查评分" :value="templateDocument.reviewScore" suffix="/ 100" />
+          <div class="mt-4 text-xs text-gray-500">{{ templateDocument.reviewSummary }}</div>
         </a-card>
       </div>
 
       <div class="lg:col-span-3">
         <a-tabs v-model:activeKey="activeTab" type="card" class="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <a-tab-pane key="content" tab="文档正文">
-            <div v-if="document.status === 'generating'" class="flex flex-col items-center py-20">
+            <div v-if="templateDocument.status === 'generating'" class="flex flex-col items-center py-20">
                <LoadingOutlined style="font-size: 40px" class="text-blue-500 mb-4" />
                <div class="text-gray-500">AI 正在努力编制中，请稍候...</div>
             </div>
@@ -481,6 +542,47 @@ watch(activeTab, async (tab) => {
         </a-tabs>
       </div>
     </div>
+
+    <a-modal
+      v-model:open="generationModalVisible"
+      title="基于模板生成文档"
+      width="760px"
+      :confirm-loading="actionLoading"
+      @ok="handleGenerateSubmit"
+    >
+      <div class="space-y-4">
+        <a-alert
+          type="info"
+          show-icon
+          message="请输入本次编制要求，并上传技术要求、代码、接口说明、已有文档等参考资料。系统会基于模板、知识库和这些材料共同生成正式文档。"
+        />
+        <a-form layout="vertical">
+          <a-form-item label="本次生成要求">
+            <a-textarea
+              v-model:value="generationForm.prompt"
+              :rows="6"
+              placeholder="例如：请根据上传的技术要求与代码，生成《软件需求规格说明书》，重点覆盖系统目标、功能需求、接口需求、性能需求、约束条件和验收要求。"
+            />
+          </a-form-item>
+          <a-form-item label="参考材料">
+            <a-upload
+              :multiple="true"
+              :before-upload="() => false"
+              :file-list="generationFileList"
+              @change="handleGenerationFileChange"
+            >
+              <a-button>
+                <template #icon><UploadOutlined /></template>
+                上传技术要求 / 代码 / 说明文档
+              </a-button>
+            </a-upload>
+            <div class="text-xs text-gray-500 mt-2">
+              支持上传 `.docx`、`.pdf`、`.md`、`.txt`、常见代码文件以及 `.zip` 代码包，系统会自动抽取文本作为生成依据。
+            </div>
+          </a-form-item>
+        </a-form>
+      </div>
+    </a-modal>
   </div>
   <a-skeleton v-else active />
 </template>
