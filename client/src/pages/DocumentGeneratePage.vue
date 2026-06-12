@@ -6,9 +6,9 @@ import { UploadOutlined, RocketOutlined, FileWordOutlined } from '@ant-design/ic
 import axios from 'axios'
 
 const loading = ref(false)
-const templateFile = ref(null)
-const parsedStructure = ref([])
-const generatedContent = ref({})
+const templateFile = ref<File | null>(null)
+const parsedStructure = ref<Array<{ title: string }>>([])
+const generatedContent = ref<Record<string, string>>({})
 
 const formState = reactive({
   projectName: '',
@@ -27,6 +27,10 @@ async function handleUpload(info: any) {
   } catch (e) {
     message.error('模板解析失败')
   }
+}
+
+function handleTemplateChange(info: any) {
+  templateFile.value = info.file as File
 }
 
 async function handleGenerate() {
@@ -70,7 +74,7 @@ async function handleDownload() {
             name="file"
             :multiple="false"
             :customRequest="handleUpload"
-            @change="info => templateFile.value = info.file"
+            @change="handleTemplateChange"
           >
             <p class="ant-upload-drag-icon"><UploadOutlined /></p>
             <p class="ant-upload-text">点击或拖拽 Word 模板上传</p>

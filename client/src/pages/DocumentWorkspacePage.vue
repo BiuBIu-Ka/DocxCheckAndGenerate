@@ -1,6 +1,6 @@
 
 <script setup lang="ts">
-import { onMounted, ref, reactive, onUnmounted } from 'vue'
+import { onMounted, ref, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { 
@@ -9,30 +9,80 @@ import {
   SaveOutlined, 
   UploadOutlined,
   LoadingOutlined,
-  DownOutlined
+  DownOutlined,
+  PlusOutlined,
+  SyncOutlined,
+  DeleteOutlined
 } from '@ant-design/icons-vue'
 import axios from 'axios'
 
+interface TemplateRule {
+  sectionName: string
+  requirementType: string
+  description: string
+  isActive: boolean
+}
+
+interface TemplateTerm {
+  standardName: string
+  aliases?: string
+  forbiddenTerms?: string
+  description?: string
+}
+
+interface TemplateStructureItem {
+  title: string
+  children?: TemplateStructureItem[]
+}
+
+interface TemplateDocument {
+  id: number
+  title: string
+  projectName: string
+  docType: string
+  status: string
+  templateFileName?: string | null
+  structureJson?: string | null
+  rulesJson?: string | null
+  termsJson?: string | null
+  contentJson?: string | null
+  issuesJson?: string | null
+  reviewScore?: number | null
+  reviewSummary?: string | null
+}
+
 const route = useRoute()
 const docId = route.params.id
-const document = ref<any>(null)
+const document = ref<TemplateDocument | null>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
 const uploadLoading = ref(false)
 const uploadError = ref('')
-const parsedStructure = ref([])
+const parsedStructure = ref<TemplateStructureItem[]>([])
 const activeTab = ref('content')
+const templateRules = ref<TemplateRule[]>([])
+const templateTerms = ref<TemplateTerm[]>([])
 
 let pollTimer: any = null
+
+function safeParseArray<T>(raw: string | null | undefined): T[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as T[]) : []
+  } catch {
+    return []
+  }
+}
 
 async function loadDocument() {
   loading.value = true
   try {
     const { data } = await axios.get(`/api/documents/${docId}`)
     document.value = data
-    if (data.structureJson) {
-      parsedStructure.value = JSON.parse(data.structureJson)
-    }
+    parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
+    templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
+    templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
     if (['generating', 'reviewing'].includes(data.status)) {
       startPolling()
     } else {
@@ -48,11 +98,19 @@ async function loadDocument() {
 function startPolling() {
   if (pollTimer) return
   pollTimer = setInterval(async () => {
-    const { data } = await axios.get(`/api/documents/${docId}`)
-    document.value = data
-    if (!['generating', 'reviewing'].includes(data.status)) {
+    try {
+      const { data } = await axios.get(`/api/documents/${docId}`)
+      document.value = data
+      parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
+      templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
+      templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
+      if (!['generating', 'reviewing'].includes(data.status)) {
+        stopPolling()
+        message.success('后台任务已完成')
+      }
+    } catch {
       stopPolling()
-      message.success('后台任务已完成')
+      message.error('后台状态轮询失败，请稍后手动刷新')
     }
   }, 3000)
 }
@@ -73,7 +131,8 @@ async function handleUploadTemplate(info: any) {
     const { data } = await axios.post('/api/documents/parse-template', formData)
     parsedStructure.value = data.structure
     const { data: updated } = await axios.put(`/api/documents/${docId}`, {
-      structureJson: JSON.stringify(data.structure)
+      structureJson: JSON.stringify(data.structure),
+      templateFileName: data.templateFileName
     })
     document.value = updated
     info.onSuccess?.(data, info.file)
@@ -125,13 +184,57 @@ async function handleReview() {
 async function handleSave() {
   try {
     await axios.put(`/api/documents/${docId}`, {
-      content_json: document.value.contentJson,
-      structure_json: JSON.stringify(parsedStructure.value)
+      contentJson: document.value?.contentJson ?? null,
+      structureJson: JSON.stringify(parsedStructure.value),
+      rulesJson: JSON.stringify(templateRules.value),
+      termsJson: JSON.stringify(templateTerms.value),
+      templateFileName: document.value?.templateFileName ?? null
     })
     message.success('模板已成功保存')
   } catch (e) {
     message.error('保存失败')
   }
+}
+
+async function handleSyncKnowledge() {
+  actionLoading.value = true
+  try {
+    const { data } = await axios.post(`/api/documents/${docId}/sync-knowledge`)
+    document.value = data
+    templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
+    templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
+    message.success('已同步全局知识库到当前模板')
+  } catch {
+    message.error('同步知识库失败')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+function addRule() {
+  templateRules.value.push({
+    sectionName: '',
+    requirementType: 'mandatory',
+    description: '',
+    isActive: true,
+  })
+}
+
+function removeRule(index: number) {
+  templateRules.value.splice(index, 1)
+}
+
+function addTerm() {
+  templateTerms.value.push({
+    standardName: '',
+    aliases: '',
+    forbiddenTerms: '',
+    description: '',
+  })
+}
+
+function removeTerm(index: number) {
+  templateTerms.value.splice(index, 1)
 }
 
 const getContent = () => {
@@ -155,8 +258,8 @@ const getIssues = () => {
 function getStatusLabel(status: string) {
   const map: any = {
     draft: '编辑中',
-    generating: '解析中',
-    reviewing: '验证中',
+    generating: '生成中',
+    reviewing: '审查中',
     completed: '已就绪',
     error: '异常'
   }
@@ -178,9 +281,11 @@ onUnmounted(stopPolling)
           </a-tag>
         </div>
         <div class="text-gray-500 mt-1">适用项目：{{ document.projectName }} · 类型：{{ document.docType }}</div>
+        <div v-if="document.templateFileName" class="text-xs text-gray-400 mt-1">源模板文件：{{ document.templateFileName }}</div>
       </div>
       <div class="flex gap-3">
         <a-button @click="handleSave"><template #icon><SaveOutlined /></template>保存模板</a-button>
+        <a-button :loading="actionLoading" @click="handleSyncKnowledge"><template #icon><SyncOutlined /></template>同步全局知识库</a-button>
         <a-dropdown>
           <template #overlay>
             <a-menu>
@@ -240,6 +345,55 @@ onUnmounted(stopPolling)
                </div>
             </div>
             <a-empty v-else description="文档暂无内容，请点击“AI 生成”或手动编辑" class="py-20" />
+          </a-tab-pane>
+
+          <a-tab-pane key="knowledge" tab="模板知识库">
+            <div class="space-y-6">
+              <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <a-card title="模板规则" size="small">
+                  <template #extra>
+                    <a-button type="link" @click="addRule"><template #icon><PlusOutlined /></template>新增规则</a-button>
+                  </template>
+                  <div class="space-y-4">
+                    <div v-for="(rule, index) in templateRules" :key="`rule-${index}`" class="border border-gray-100 rounded-lg p-4 bg-gray-50">
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <a-input v-model:value="rule.sectionName" placeholder="章节名称，例如：1 范围" />
+                        <a-select v-model:value="rule.requirementType">
+                          <a-select-option value="mandatory">必备章节</a-select-option>
+                          <a-select-option value="optional">建议章节</a-select-option>
+                        </a-select>
+                        <a-textarea v-model:value="rule.description" :rows="2" placeholder="编制要求或审查建议" class="md:col-span-2" />
+                      </div>
+                      <div class="flex justify-between items-center mt-3">
+                        <a-checkbox v-model:checked="rule.isActive">启用该规则</a-checkbox>
+                        <a-button danger type="link" @click="removeRule(index)"><template #icon><DeleteOutlined /></template>删除</a-button>
+                      </div>
+                    </div>
+                    <a-empty v-if="!templateRules.length" description="当前模板尚未配置规则" />
+                  </div>
+                </a-card>
+
+                <a-card title="模板术语库" size="small">
+                  <template #extra>
+                    <a-button type="link" @click="addTerm"><template #icon><PlusOutlined /></template>新增术语</a-button>
+                  </template>
+                  <div class="space-y-4">
+                    <div v-for="(term, index) in templateTerms" :key="`term-${index}`" class="border border-gray-100 rounded-lg p-4 bg-gray-50">
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <a-input v-model:value="term.standardName" placeholder="标准术语" />
+                        <a-input v-model:value="term.aliases" placeholder="别名，可选" />
+                        <a-input v-model:value="term.forbiddenTerms" placeholder="禁用词，逗号分隔" class="md:col-span-2" />
+                        <a-textarea v-model:value="term.description" :rows="2" placeholder="术语说明或替换策略" class="md:col-span-2" />
+                      </div>
+                      <div class="flex justify-end mt-3">
+                        <a-button danger type="link" @click="removeTerm(index)"><template #icon><DeleteOutlined /></template>删除</a-button>
+                      </div>
+                    </div>
+                    <a-empty v-if="!templateTerms.length" description="当前模板尚未配置术语约束" />
+                  </div>
+                </a-card>
+              </div>
+            </div>
           </a-tab-pane>
           
           <a-tab-pane key="issues" tab="审查问题">

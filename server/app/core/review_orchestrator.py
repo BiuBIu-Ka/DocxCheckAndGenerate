@@ -15,17 +15,15 @@ class ReviewOrchestrator:
             content_dict = json.loads(doc.content_json)
             full_text = "\n".join([f"{k}\n{v}" for k, v in content_dict.items()])
             
-            # Rule based review
-            issues = await rule_engine.evaluate_db(doc.doc_type, full_text)
-            # Consistency check
-            issues.extend(await consistency_checker.evaluate_db(full_text))
+            issues = await rule_engine.evaluate_template(doc.rules_json, doc.doc_type, full_text)
+            issues.extend(await consistency_checker.evaluate_template(doc.terms_json, full_text))
             
             score = max(0, 100 - len(issues) * 5)
             summary = f"审查完成，发现 {len(issues)} 个问题点。"
             
             doc.review_score = score
             doc.review_summary = summary
-            doc.issues_json = json.dumps([issue.dict() for issue in issues])
+            doc.issues_json = json.dumps([issue.dict() for issue in issues], ensure_ascii=False)
             doc.status = "completed"
             await session.commit()
 

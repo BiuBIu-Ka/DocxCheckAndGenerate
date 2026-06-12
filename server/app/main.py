@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
-from app.db.database import engine, Base
+from app.db.database import ensure_sqlite_schema
 
 app = FastAPI(
     title="军工软件文档智能编制与审查平台",
@@ -20,9 +20,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    async with engine.begin() as conn:
-        # Create tables if not exist
-        await conn.run_sync(Base.metadata.create_all)
+    await ensure_sqlite_schema()
 
 @app.get("/health")
 def healthcheck() -> dict[str, str]:

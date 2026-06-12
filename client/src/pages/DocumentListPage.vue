@@ -14,8 +14,18 @@ import {
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
+interface TemplateRecord {
+  id: number
+  title: string
+  projectName: string
+  docType: string
+  status: string
+  reviewScore: number | null
+  updatedAt?: string
+}
+
 const router = useRouter()
-const documents = ref([])
+const documents = ref<TemplateRecord[]>([])
 const loading = ref(false)
 const modalVisible = ref(false)
 const searchText = ref('')
@@ -92,8 +102,8 @@ function getStatusColor(status: string) {
 function getStatusLabel(status: string) {
   const map: any = {
     draft: '编辑中',
-    generating: '解析中',
-    reviewing: '验证中',
+    generating: '生成中',
+    reviewing: '审查中',
     completed: '已就绪',
     error: '异常'
   }
@@ -233,4 +243,3 @@ onMounted(loadDocuments)
   @apply bg-gray-50 font-bold text-gray-600;
 }
 </style>
-

@@ -5,7 +5,17 @@ import { message } from 'ant-design-vue'
 import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
 import axios from 'axios'
 
-const providers = ref([])
+interface ModelProvider {
+  id: number
+  name: string
+  provider: string
+  model_name?: string
+  base_url?: string
+  is_default?: boolean
+  last_status?: string
+}
+
+const providers = ref<ModelProvider[]>([])
 const loading = ref(false)
 const modalVisible = ref(false)
 const testLoading = ref(false)

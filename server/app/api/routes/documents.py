@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db.database import get_db
-from app.db.models import Document
+from app.db.models import Document, GjbRule, TermBase
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentSchema
 from app.services.docx_parser import docx_parser
 from typing import List
@@ -11,8 +11,54 @@ from pathlib import Path
 import shutil
 import os
 import tempfile
+import json
 
 router = APIRouter()
+
+
+async def build_template_knowledge_snapshot(db: AsyncSession, doc_type: str) -> tuple[str, str]:
+    rules_result = await db.execute(
+        select(GjbRule).where(GjbRule.doc_type == doc_type, GjbRule.is_active == True)
+    )
+    term_result = await db.execute(select(TermBase))
+
+    rules_json = json.dumps(
+        [
+            {
+                "sectionName": rule.section_name,
+                "requirementType": rule.requirement_type,
+                "description": rule.description,
+                "isActive": rule.is_active,
+            }
+            for rule in rules_result.scalars().all()
+        ],
+        ensure_ascii=False,
+    )
+    terms_json = json.dumps(
+        [
+            {
+                "standardName": term.standard_name,
+                "aliases": term.aliases,
+                "forbiddenTerms": term.forbidden_terms,
+                "description": term.description,
+            }
+            for term in term_result.scalars().all()
+        ],
+        ensure_ascii=False,
+    )
+    return rules_json, terms_json
+
+
+def validate_json_payload(field_name: str, value: str | None) -> None:
+    if value is None:
+        return
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} 不是合法的 JSON 数据。") from exc
+
+    if field_name in {"structureJson", "rulesJson", "termsJson"} and not isinstance(parsed, list):
+        raise HTTPException(status_code=400, detail=f"{field_name} 必须为数组结构。")
 
 @router.get("", response_model=List[DocumentSchema])
 async def list_documents(db: AsyncSession = Depends(get_db)):
@@ -21,7 +67,8 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=DocumentSchema)
 async def create_document(doc: DocumentCreate, db: AsyncSession = Depends(get_db)):
-    db_doc = Document(**doc.dict())
+    rules_json, terms_json = await build_template_knowledge_snapshot(db, doc.doc_type)
+    db_doc = Document(**doc.dict(), rules_json=rules_json, terms_json=terms_json)
     db.add(db_doc)
     await db.commit()
     await db.refresh(db_doc)
@@ -39,10 +86,15 @@ async def update_document(id: int, doc_update: DocumentUpdate, db: AsyncSession 
     db_doc = await db.get(Document, id)
     if not db_doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    
-    for key, value in doc_update.dict(exclude_unset=True).items():
+
+    payload = doc_update.dict(exclude_unset=True)
+    validate_json_payload("structureJson", payload.get("structure_json"))
+    validate_json_payload("rulesJson", payload.get("rules_json"))
+    validate_json_payload("termsJson", payload.get("terms_json"))
+
+    for key, value in payload.items():
         setattr(db_doc, key, value)
-    
+
     await db.commit()
     await db.refresh(db_doc)
     return db_doc
@@ -55,6 +107,20 @@ async def delete_document(id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(db_doc)
     await db.commit()
     return {"success": True}
+
+
+@router.post("/{id}/sync-knowledge", response_model=DocumentSchema)
+async def sync_document_knowledge(id: int, db: AsyncSession = Depends(get_db)):
+    db_doc = await db.get(Document, id)
+    if not db_doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    rules_json, terms_json = await build_template_knowledge_snapshot(db, db_doc.doc_type)
+    db_doc.rules_json = rules_json
+    db_doc.terms_json = terms_json
+    await db.commit()
+    await db.refresh(db_doc)
+    return db_doc
 
 @router.post("/parse-template")
 async def parse_template(file: UploadFile = File(...)):
@@ -75,7 +141,9 @@ async def parse_template(file: UploadFile = File(...)):
 
     try:
         structure = docx_parser.parse_structure(temp_path)
-        return {"structure": structure}
+        if not structure:
+            raise HTTPException(status_code=400, detail="模板解析完成，但未识别到任何标题结构，请检查 Word 标题样式。")
+        return {"structure": structure, "templateFileName": filename}
     except HTTPException:
         raise
     except Exception as exc:

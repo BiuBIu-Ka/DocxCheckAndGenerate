@@ -123,7 +123,7 @@ onMounted(loadData)
   <div class="space-y-6">
     <div class="hero-section">
       <div class="hero-title">GJB 知识库维护</div>
-      <div class="hero-desc">在这里管理 GJB 438B 审查规则与术语基线，AI 审查引擎将实时应用这些配置。</div>
+      <div class="hero-desc">在这里维护全局默认规则与术语基线；模板工作台可一键同步这些知识，并在模板内继续精细化调整。</div>
     </div>
 
     <a-tabs v-model:activeKey="activeTab" type="line" class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">

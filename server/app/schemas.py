@@ -21,6 +21,24 @@ class ReviewResponse(BaseModel):
     summary: str
     issues: List[ReviewIssue]
 
+
+class TemplateRule(BaseModel):
+    section_name: str = Field(alias="sectionName")
+    requirement_type: str = Field(alias="requirementType")
+    description: str
+    is_active: bool = Field(True, alias="isActive")
+
+    model_config = {"populate_by_name": True}
+
+
+class TemplateTerm(BaseModel):
+    standard_name: str = Field(alias="standardName")
+    aliases: Optional[str] = None
+    forbidden_terms: Optional[str] = Field(None, alias="forbiddenTerms")
+    description: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
+
 # Document Models
 class DocumentBase(BaseModel):
     title: str
@@ -35,7 +53,10 @@ class DocumentCreate(DocumentBase):
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     status: Optional[str] = None
+    template_file_name: Optional[str] = Field(None, alias="templateFileName")
     structure_json: Optional[str] = Field(None, alias="structureJson")
+    rules_json: Optional[str] = Field(None, alias="rulesJson")
+    terms_json: Optional[str] = Field(None, alias="termsJson")
     content_json: Optional[str] = Field(None, alias="contentJson")
     review_score: Optional[int] = Field(None, alias="reviewScore")
     review_summary: Optional[str] = Field(None, alias="reviewSummary")
@@ -46,7 +67,10 @@ class DocumentUpdate(BaseModel):
 class DocumentSchema(DocumentBase):
     id: int
     status: str
+    template_file_name: Optional[str] = Field(None, alias="templateFileName")
     structure_json: Optional[str] = Field(None, alias="structureJson")
+    rules_json: Optional[str] = Field(None, alias="rulesJson")
+    terms_json: Optional[str] = Field(None, alias="termsJson")
     content_json: Optional[str] = Field(None, alias="contentJson")
     review_score: Optional[int] = Field(None, alias="reviewScore")
     review_summary: Optional[str] = Field(None, alias="reviewSummary")
