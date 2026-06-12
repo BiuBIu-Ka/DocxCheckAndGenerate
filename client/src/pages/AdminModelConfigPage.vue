@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { onMounted, ref, reactive } from 'vue'
 import { message } from 'ant-design-vue'
-import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined, EditOutlined } from '@ant-design/icons-vue'
 import axios from 'axios'
 
 interface ModelProvider {
@@ -19,6 +19,7 @@ const providers = ref<ModelProvider[]>([])
 const loading = ref(false)
 const modalVisible = ref(false)
 const testLoading = ref(false)
+const editingId = ref<number | null>(null)
 
 const formState = reactive({
   name: '',
@@ -41,19 +42,47 @@ async function loadConfigs() {
   }
 }
 
-async function handleAdd() {
+function resetForm() {
+  Object.assign(formState, {
+    name: '',
+    provider: 'openai',
+    base_url: 'https://api.deepseek.com/v1',
+    api_key: '',
+    model_name: 'deepseek-chat',
+    is_default: false
+  })
+  editingId.value = null
+}
+
+function openCreateModal() {
+  resetForm()
+  modalVisible.value = true
+}
+
+function openEditModal(item: ModelProvider) {
+  editingId.value = item.id
+  Object.assign(formState, {
+    name: item.name || '',
+    provider: item.provider || 'openai',
+    base_url: item.base_url || '',
+    api_key: '',
+    model_name: item.model_name || '',
+    is_default: item.is_default || false
+  })
+  modalVisible.value = true
+}
+
+async function handleSubmit() {
   try {
-    await axios.post('/api/model-providers', formState)
-    message.success('添加成功')
+    if (editingId.value) {
+      await axios.put(`/api/model-providers/${editingId.value}`, formState)
+      message.success('更新成功')
+    } else {
+      await axios.post('/api/model-providers', formState)
+      message.success('添加成功')
+    }
     modalVisible.value = false
-    Object.assign(formState, {
-      name: '',
-      provider: 'openai',
-      base_url: 'https://api.deepseek.com/v1',
-      api_key: '',
-      model_name: 'deepseek-chat',
-      is_default: false
-    })
+    resetForm()
     loadConfigs()
   } catch (e: any) {
     message.error(e?.response?.data?.detail || '保存失败')
@@ -93,7 +122,7 @@ onMounted(loadConfigs)
   <div class="space-y-6">
     <div class="flex justify-between items-center">
       <h2 class="text-2xl font-bold">模型配置中心</h2>
-      <a-button type="primary" @click="modalVisible = true">
+      <a-button type="primary" @click="openCreateModal">
         <template #icon><PlusOutlined /></template>
         添加新模型
       </a-button>
@@ -108,9 +137,14 @@ onMounted(loadConfigs)
           </div>
         </template>
         <template #extra>
-          <a-button type="link" danger @click="handleDelete(item.id)">
-            <template #icon><DeleteOutlined /></template>
-          </a-button>
+          <div class="flex items-center gap-1">
+            <a-button type="link" @click="openEditModal(item)">
+              <template #icon><EditOutlined /></template>
+            </a-button>
+            <a-button type="link" danger @click="handleDelete(item.id)">
+              <template #icon><DeleteOutlined /></template>
+            </a-button>
+          </div>
         </template>
 
         <div class="space-y-3">
@@ -139,7 +173,7 @@ onMounted(loadConfigs)
       </a-card>
     </div>
 
-    <a-modal v-model:open="modalVisible" title="添加模型供应方" @ok="handleAdd">
+    <a-modal v-model:open="modalVisible" :title="editingId ? '编辑模型配置' : '添加模型供应方'" @ok="handleSubmit" @cancel="resetForm">
       <a-form layout="vertical">
         <a-form-item label="配置名称">
           <a-input v-model:value="formState.name" placeholder="例如：DeepSeek官方" />
@@ -155,7 +189,7 @@ onMounted(loadConfigs)
           <a-input v-model:value="formState.base_url" placeholder="https://api.openai.com/v1" />
         </a-form-item>
         <a-form-item label="API Key">
-          <a-input-password v-model:value="formState.api_key" placeholder="sk-..." />
+          <a-input-password v-model:value="formState.api_key" :placeholder="editingId ? '如需更换密钥请重新填写' : 'sk-...'" />
         </a-form-item>
         <a-form-item label="模型名称">
           <a-input v-model:value="formState.model_name" placeholder="gpt-4o / deepseek-chat" />

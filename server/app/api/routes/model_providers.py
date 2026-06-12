@@ -57,6 +57,30 @@ async def create_model(config: ModelConfigCreate, db: AsyncSession = Depends(get
     await db.refresh(db_config)
     return db_config
 
+
+@router.put("/{id}")
+async def update_model(id: int, config: ModelConfigCreate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == id))
+    db_config = result.scalars().first()
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    payload = sanitize_config(config)
+    if not payload["api_key"]:
+        payload["api_key"] = db_config.api_key
+
+    if config.is_default:
+        await db.execute(
+            ModelConfig.__table__.update().where(ModelConfig.id != id).values(is_default=False)
+        )
+
+    for key, value in payload.items():
+        setattr(db_config, key, value)
+
+    await db.commit()
+    await db.refresh(db_config)
+    return db_config
+
 @router.post("/test/{id}")
 async def test_model(id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ModelConfig).where(ModelConfig.id == id))
