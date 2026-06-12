@@ -216,7 +216,55 @@ const doc = new Document({
           text: "{name}",
           heading: HeadingLevel.HEADING_4, // 功能作为 Heading 4 (3.2.1.1 GN_XNCZXT 虚拟拆装系统)
         }),
-        new Paragraph({ text: "{desc}" }),
+        new Paragraph({ text: "需求用例如下表所示。" }),
+        new Paragraph({ text: "表 {name}需求用例表", alignment: AlignmentType.CENTER }),
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "角色", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{role}")] }),
+              ],
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "功能描述", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{desc}")] }),
+              ],
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "前置条件", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{preCondition}")] }),
+              ],
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "后置条件", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{postCondition}")] }),
+              ],
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "基本流", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{basicFlow}")] }),
+              ],
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "扩展流", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{extendFlow}")] }),
+              ],
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: "约束条件", bold: true })] }),
+                new TableCell({ children: [new Paragraph("{constraint}")] }),
+              ],
+            }),
+          ],
+        }),
         new Paragraph({ text: "{/features}" }),
         new Paragraph({ text: "{/modules}" }),
         // =========================================================
