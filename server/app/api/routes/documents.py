@@ -16,6 +16,7 @@ import os
 import tempfile
 import json
 from docx import Document as DocxDocument
+from docxtpl import DocxTemplate
 
 router = APIRouter()
 STORAGE_ROOT = Path(__file__).resolve().parents[3] / "storage" / "templates"
@@ -141,6 +142,15 @@ async def upload_template_file(id: int, file: UploadFile = File(...), db: AsyncS
     try:
         saved_path = save_template_file(id, file)
         parsed = word_template_parser.parse_template(str(saved_path), filename)
+        
+        placeholders = []
+        if suffix == ".docx":
+            try:
+                tpl = DocxTemplate(str(saved_path))
+                placeholders = list(tpl.get_undeclared_template_variables())
+            except Exception as e:
+                print(f"Failed to extract docxtpl variables: {e}")
+                
     except HTTPException:
         raise
     except Exception as exc:
@@ -150,6 +160,7 @@ async def upload_template_file(id: int, file: UploadFile = File(...), db: AsyncS
     db_doc.template_file_path = str(saved_path)
     db_doc.template_html = parsed["html"]
     db_doc.structure_json = json.dumps(parsed["structure"], ensure_ascii=False)
+    db_doc.placeholders_json = json.dumps(placeholders, ensure_ascii=False)
     await db.commit()
     await db.refresh(db_doc)
     return db_doc
@@ -179,7 +190,22 @@ async def export_document_docx(id: int, db: AsyncSession = Depends(get_db)):
             structure = []
 
     template_path = Path(db_doc.template_file_path) if db_doc.template_file_path else None
-    if template_path and template_path.exists() and template_path.suffix.lower() == ".docx":
+    placeholders = []
+    if db_doc.placeholders_json:
+        try:
+            placeholders = json.loads(db_doc.placeholders_json)
+        except Exception:
+            pass
+
+    if placeholders and template_path and template_path.exists() and template_path.suffix.lower() == ".docx":
+        # It's a Jinja2 template driven generation
+        try:
+            tpl = DocxTemplate(str(template_path))
+            tpl.render(content_map)
+            tpl.save(temp_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"渲染模板失败: {exc}") from exc
+    elif template_path and template_path.exists() and template_path.suffix.lower() == ".docx":
         template_docx_service.export_with_template(
             str(template_path),
             temp_path,

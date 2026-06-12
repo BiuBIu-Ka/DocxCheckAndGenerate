@@ -2,7 +2,9 @@
 from app.core.llm_client import model_manager
 from app.db.database import AsyncSessionLocal
 from app.db.models import Document
+from app.services.generation_context_service import generation_context_service
 import json
+import re
 
 class GenerationOrchestrator:
     def _flatten_structure(self, structure: list) -> list[str]:
@@ -57,9 +59,51 @@ class GenerationOrchestrator:
                 await session.commit()
                 return
 
+            knowledge_prompt = self._knowledge_prompt(doc)
+            placeholders = []
+            if doc.placeholders_json:
+                try:
+                    placeholders = json.loads(doc.placeholders_json)
+                except Exception:
+                    pass
+
+            if placeholders and doc.template_file_path:
+                template_text = generation_context_service.extract_text(doc.template_file_path, doc.template_file_name)
+                llm_prompt = (
+                    f"请作为军工软件专家，为项目【{doc.project_name}】编写【{doc.doc_type}】。\n"
+                    f"要求：符合规范，严格遵守知识与术语要求。\n"
+                    f"{knowledge_prompt}\n\n"
+                    f"这是一个包含 Jinja2 占位符和循环（如 {{% for %}}）的 Word 模板。模板结构与变量分布如下：\n"
+                    f"```\n{template_text[:3000]}\n```\n\n" # Limiting template text size for context window
+                    f"需要你提供数据的占位符变量包括：{placeholders}\n"
+                    f"编制背景与用户要求：{prompt}\n"
+                    f"参考资料如下：\n{source_context or '无额外参考资料'}\n\n"
+                    f"请根据模板的 Jinja2 结构特征，自动推断所需的 JSON 数据结构（例如推断出某个变量是否应该是数组或对象）。\n"
+                    f"**必须且仅输出一个合法的 JSON 对象**，JSON 的 key 应匹配所需的变量，不要包含 ```json 等 Markdown 标记，直接输出 JSON 文本。"
+                )
+
+                try:
+                    content = await client.chat_completion([{"role": "user", "content": llm_prompt}])
+                    # Clean markdown code block if model still outputs it
+                    content = re.sub(r"^```json\s*", "", content.strip())
+                    content = re.sub(r"^```\s*", "", content)
+                    content = re.sub(r"\s*```$", "", content)
+                    
+                    # Test if it's valid JSON
+                    json.loads(content)
+                    
+                    doc.content_json = content
+                    doc.review_summary = f"基于模板占位符的 JSON 数据生成完成。"
+                except Exception as e:
+                    doc.content_json = "{}"
+                    doc.review_summary = f"生成失败: {str(e)}"
+                
+                doc.status = "completed"
+                await session.commit()
+                return
+
             sections = {}
             section_titles = self._flatten_structure(structure)
-            knowledge_prompt = self._knowledge_prompt(doc)
             for title in section_titles:
                 llm_prompt = (
                     f"请作为军工软件专家，为项目【{doc.project_name}】编写【{doc.doc_type}】模板下的章节：{title}。\n"

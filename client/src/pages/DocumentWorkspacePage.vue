@@ -14,7 +14,8 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  ApiOutlined
 } from '@ant-design/icons-vue'
 import axios from 'axios'
 
@@ -49,6 +50,7 @@ interface TemplateDocument {
   structureJson?: string | null
   rulesJson?: string | null
   termsJson?: string | null
+  placeholdersJson?: string | null
   generationPrompt?: string | null
   generationSourcesJson?: string | null
   contentJson?: string | null
@@ -477,6 +479,15 @@ function removeTerm(index: number) {
   knowledgeDirty.value = true
 }
 
+function getPlaceholders() {
+  if (!templateDocument.value?.placeholdersJson) return []
+  try {
+    return JSON.parse(templateDocument.value.placeholdersJson) || []
+  } catch {
+    return []
+  }
+}
+
 const getContent = () => {
   if (!templateDocument.value?.contentJson) return {}
   try {
@@ -547,6 +558,7 @@ watch(activeTab, async (tab) => {
             <a-button block @click="activeTab = 'structure'"><template #icon><FileTextOutlined /></template>维护模板章节</a-button>
             <a-button block @click="activeTab = 'template'"><template #icon><EditOutlined /></template>维护模板版式</a-button>
             <a-button block @click="activeTab = 'knowledge'"><template #icon><SafetyCertificateOutlined /></template>维护模板规则</a-button>
+            <a-button block @click="activeTab = 'placeholders'"><template #icon><ApiOutlined /></template>模板变量清单</a-button>
           </div>
           <div v-if="parsedStructure.length" class="space-y-1">
             <div class="text-xs font-bold mb-2 text-gray-500">当前模板基线章节：</div>
@@ -686,6 +698,31 @@ watch(activeTab, async (tab) => {
                   </div>
                 </a-card>
               </div>
+            </div>
+          </a-tab-pane>
+          
+          <a-tab-pane key="placeholders" tab="模板变量与动态循环">
+            <div class="space-y-4">
+              <a-alert
+                type="info"
+                show-icon
+                message="系统已从模板文件中提取出需要 AI 填写的占位符。AI 将在生成时自动推断数据结构并提取内容填入。"
+              />
+              <div v-if="getPlaceholders().length" class="flex flex-wrap gap-2">
+                <a-tag v-for="item in getPlaceholders()" :key="item" color="purple">{{ '{{ ' + item + ' }}' }}</a-tag>
+              </div>
+              <a-empty v-else description="当前模板未检测到 Jinja2 占位符变量" />
+              
+              <a-card title="支持动态扩充的高级模板规范" size="small" class="mt-6 bg-gray-50">
+                <div class="text-sm text-gray-600 space-y-2">
+                  <p>如果参考资料包含多个功能点（如10个），但模板只有一个结构，你可以使用 <strong>Jinja2 循环语句</strong>让模板自动扩充排版：</p>
+                  <ul class="list-disc pl-5">
+                    <li><strong>表格行循环</strong>：在 Word 表格的某一行首尾加入 <code>{% tr for item in features %}</code> 和 <code>{% tr endfor %}</code>，中间单元格写 <code v-pre>{{ item.name }}</code>。</li>
+                    <li><strong>段落循环</strong>：在段落前后加入 <code>{% p for item in features %}</code> 和 <code>{% p endfor %}</code>。</li>
+                  </ul>
+                  <p>AI 会自动识别这些结构，输出一个包含多条数据的 JSON 数组，解析器将自动把表格或段落循环渲染 10 次，完美保留所有原格式！</p>
+                </div>
+              </a-card>
             </div>
           </a-tab-pane>
           

@@ -28,6 +28,7 @@ async def ensure_sqlite_schema() -> None:
             "template_html": "TEXT",
             "rules_json": "TEXT",
             "terms_json": "TEXT",
+            "placeholders_json": "TEXT",
             "generation_prompt": "TEXT",
             "generation_sources_json": "TEXT",
         }
