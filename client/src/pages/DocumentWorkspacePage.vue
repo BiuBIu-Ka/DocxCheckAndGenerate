@@ -1,6 +1,6 @@
 
 <script setup lang="ts">
-import { onMounted, ref, onUnmounted } from 'vue'
+import { onMounted, ref, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { 
@@ -42,6 +42,7 @@ interface TemplateDocument {
   docType: string
   status: string
   templateFileName?: string | null
+  templateHtml?: string | null
   structureJson?: string | null
   rulesJson?: string | null
   termsJson?: string | null
@@ -62,6 +63,8 @@ const parsedStructure = ref<TemplateStructureItem[]>([])
 const activeTab = ref('content')
 const templateRules = ref<TemplateRule[]>([])
 const templateTerms = ref<TemplateTerm[]>([])
+const templateHtml = ref('')
+const templateEditor = ref<HTMLElement | null>(null)
 
 let pollTimer: any = null
 
@@ -75,14 +78,53 @@ function safeParseArray<T>(raw: string | null | undefined): T[] {
   }
 }
 
+function extractTitleFromText(text: string) {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 60)
+}
+
+function buildStructureFromHtml(html: string): TemplateStructureItem[] {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html || '', 'text/html')
+  const headings = Array.from(doc.body.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+  if (headings.length) {
+    return headings.map((heading) => ({
+      title: extractTitleFromText(heading.textContent || '未命名章节') || '未命名章节',
+      children: [],
+    }))
+  }
+
+  const paragraphs = Array.from(doc.body.querySelectorAll('p'))
+    .map((paragraph) => extractTitleFromText(paragraph.textContent || ''))
+    .filter(Boolean)
+  if (paragraphs.length) {
+    return paragraphs.slice(0, 20).map((title) => ({ title, children: [] }))
+  }
+
+  return [{ title: '模板正文', children: [] }]
+}
+
+async function syncTemplateEditor() {
+  await nextTick()
+  if (!templateEditor.value) return
+  if (templateEditor.value.innerHTML !== templateHtml.value) {
+    templateEditor.value.innerHTML = templateHtml.value || '<p>请上传模板文件或在此直接编写模板内容。</p>'
+  }
+}
+
+function handleTemplateHtmlInput(event: Event) {
+  templateHtml.value = (event.target as HTMLElement).innerHTML
+}
+
 async function loadDocument() {
   loading.value = true
   try {
     const { data } = await axios.get(`/api/documents/${docId}`)
     document.value = data
+    templateHtml.value = data.templateHtml || ''
     parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
     templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
     templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
+    await syncTemplateEditor()
     if (['generating', 'reviewing'].includes(data.status)) {
       startPolling()
     } else {
@@ -101,9 +143,11 @@ function startPolling() {
     try {
       const { data } = await axios.get(`/api/documents/${docId}`)
       document.value = data
+      templateHtml.value = data.templateHtml || ''
       parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
       templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
       templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
+      await syncTemplateEditor()
       if (!['generating', 'reviewing'].includes(data.status)) {
         stopPolling()
         message.success('后台任务已完成')
@@ -130,13 +174,16 @@ async function handleUploadTemplate(info: any) {
   try {
     const { data } = await axios.post('/api/documents/parse-template', formData)
     parsedStructure.value = data.structure
+    templateHtml.value = data.html || ''
     const { data: updated } = await axios.put(`/api/documents/${docId}`, {
       structureJson: JSON.stringify(data.structure),
+      templateHtml: data.html || '',
       templateFileName: data.templateFileName
     })
     document.value = updated
+    await syncTemplateEditor()
     info.onSuccess?.(data, info.file)
-    message.success('模板解析成功，章节结构已同步')
+    message.success('模板已替换并解析完成')
   } catch (e: any) {
     const detail = e?.response?.data?.detail || e?.message || '模板解析失败'
     uploadError.value = detail
@@ -183,9 +230,12 @@ async function handleReview() {
 
 async function handleSave() {
   try {
+    const derivedStructure = buildStructureFromHtml(templateHtml.value)
+    parsedStructure.value = derivedStructure
     await axios.put(`/api/documents/${docId}`, {
       contentJson: document.value?.contentJson ?? null,
-      structureJson: JSON.stringify(parsedStructure.value),
+      templateHtml: templateHtml.value,
+      structureJson: JSON.stringify(derivedStructure),
       rulesJson: JSON.stringify(templateRules.value),
       termsJson: JSON.stringify(templateTerms.value),
       templateFileName: document.value?.templateFileName ?? null
@@ -268,6 +318,11 @@ function getStatusLabel(status: string) {
 
 onMounted(loadDocument)
 onUnmounted(stopPolling)
+watch(activeTab, async (tab) => {
+  if (tab === 'template') {
+    await syncTemplateEditor()
+  }
+})
 </script>
 
 <template>
@@ -310,7 +365,7 @@ onUnmounted(stopPolling)
           <a-upload-dragger accept=".docx" :multiple="false" :show-upload-list="false" :customRequest="handleUploadTemplate" class="mb-4">
             <template #icon><UploadOutlined /></template>
             <p class="ant-upload-text">点击或拖拽 Word 模板到此处</p>
-            <p class="ant-upload-hint text-xs">仅支持 `.docx`，系统将自动解析 Heading 样式并提取章节树</p>
+            <p class="ant-upload-hint text-xs">仅支持 `.docx`。每次上传都会替换当前模板文件，并转换为可编辑 HTML 样式。</p>
           </a-upload-dragger>
           <a-alert v-if="uploadLoading" type="info" show-icon message="正在解析模板，请稍候..." class="mb-3" />
           <a-alert v-else-if="uploadError" :message="uploadError" type="error" show-icon class="mb-3" />
@@ -345,6 +400,20 @@ onUnmounted(stopPolling)
                </div>
             </div>
             <a-empty v-else description="文档暂无内容，请点击“AI 生成”或手动编辑" class="py-20" />
+          </a-tab-pane>
+
+          <a-tab-pane key="template" tab="模板可视编辑">
+            <div class="space-y-4">
+              <div class="text-sm text-gray-500">
+                当前模板文件会被转换为 HTML 可视内容。你可以直接在下面继续修改，保存后系统会反推章节结构并作为模板基线保存。
+              </div>
+              <div
+                ref="templateEditor"
+                contenteditable="true"
+                class="min-h-[520px] rounded-lg border border-gray-200 bg-white p-6 outline-none focus:border-blue-500 whitespace-normal"
+                @input="handleTemplateHtmlInput"
+              />
+            </div>
           </a-tab-pane>
 
           <a-tab-pane key="knowledge" tab="模板知识库">

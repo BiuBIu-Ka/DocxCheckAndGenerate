@@ -54,6 +54,7 @@ class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     status: Optional[str] = None
     template_file_name: Optional[str] = Field(None, alias="templateFileName")
+    template_html: Optional[str] = Field(None, alias="templateHtml")
     structure_json: Optional[str] = Field(None, alias="structureJson")
     rules_json: Optional[str] = Field(None, alias="rulesJson")
     terms_json: Optional[str] = Field(None, alias="termsJson")
@@ -68,6 +69,7 @@ class DocumentSchema(DocumentBase):
     id: int
     status: str
     template_file_name: Optional[str] = Field(None, alias="templateFileName")
+    template_html: Optional[str] = Field(None, alias="templateHtml")
     structure_json: Optional[str] = Field(None, alias="structureJson")
     rules_json: Optional[str] = Field(None, alias="rulesJson")
     terms_json: Optional[str] = Field(None, alias="termsJson")

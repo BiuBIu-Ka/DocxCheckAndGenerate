@@ -24,6 +24,7 @@ async def ensure_sqlite_schema() -> None:
         required_columns = {
             "structure_json": "TEXT",
             "template_file_name": "VARCHAR",
+            "template_html": "TEXT",
             "rules_json": "TEXT",
             "terms_json": "TEXT",
         }

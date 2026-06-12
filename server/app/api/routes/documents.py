@@ -140,10 +140,12 @@ async def parse_template(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"模板文件保存失败: {exc}") from exc
 
     try:
-        structure = docx_parser.parse_structure(temp_path)
-        if not structure:
-            raise HTTPException(status_code=400, detail="模板解析完成，但未识别到任何标题结构，请检查 Word 标题样式。")
-        return {"structure": structure, "templateFileName": filename}
+        parsed = docx_parser.parse_template(temp_path)
+        return {
+            "structure": parsed["structure"],
+            "html": parsed["html"],
+            "templateFileName": filename,
+        }
     except HTTPException:
         raise
     except Exception as exc:
