@@ -153,6 +153,7 @@ async def upload_template_file(id: int, file: UploadFile = File(...), db: AsyncS
                 # Replace special docxtpl tags to allow Jinja2 parsing for variable extraction
                 import re
                 clean_xml = re.sub(r'\{%\s*(tr|p|tc)\s+', '{% ', xml)
+                clean_xml = re.sub(r'\{%\s*(tr|p|tc)\s+end', '{% end', clean_xml)
                 
                 import jinja2
                 from jinja2 import meta
