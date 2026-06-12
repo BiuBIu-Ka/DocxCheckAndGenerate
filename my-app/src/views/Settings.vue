@@ -29,6 +29,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getSettings, saveSettings as saveAppSettings } from '../utils/bridge'
 
 const form = ref({
   apiUrl: '',
@@ -39,7 +40,7 @@ const saving = ref(false)
 
 onMounted(async () => {
   try {
-    const settings = await window.ipcRenderer.invoke('get-settings')
+    const settings = await getSettings()
     if (settings) {
       form.value.apiUrl = settings.apiUrl || ''
       form.value.apiKey = settings.apiKey || ''
@@ -53,7 +54,7 @@ onMounted(async () => {
 const saveSettings = async () => {
   saving.value = true
   try {
-    await window.ipcRenderer.invoke('save-settings', {
+    await saveAppSettings({
       apiUrl: form.value.apiUrl,
       apiKey: form.value.apiKey,
       modelName: form.value.modelName

@@ -11,7 +11,7 @@
         <el-form-item label="DOCX 模板文件">
           <div class="file-selector">
             <el-button type="primary" @click="selectTemplate">选择模板文件</el-button>
-            <span class="file-path" v-if="templatePath">{{ templatePath }}</span>
+            <span class="file-path" v-if="templateName">{{ templateName }}</span>
             <span class="file-path text-gray" v-else>未选择文件</span>
           </div>
           <div class="tip">请选择包含变量标记（如 {name}, {#items} ... {/items}）的 DOCX 文件</div>
@@ -43,21 +43,22 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
+import { getSettings, saveSettings, selectTemplateFile, saveTemplateBuffer } from '../utils/bridge'
 
 const templatePath = ref('')
+const templateName = ref('')
 const standardText = ref('')
 const templateVariables = ref<string[]>([])
 const saving = ref(false)
 
 onMounted(async () => {
   try {
-    const settings = await window.ipcRenderer.invoke('get-settings')
+    const settings = await getSettings()
     if (settings) {
       templatePath.value = settings.templatePath || ''
+      templateName.value = settings.templateName || templatePath.value || ''
       standardText.value = settings.standardText || ''
-      if (templatePath.value) {
-        await extractVariables(templatePath.value)
-      }
+      templateVariables.value = settings.templateVariables || []
     }
   } catch (error) {
     console.error('Failed to load settings', error)
@@ -65,19 +66,17 @@ onMounted(async () => {
 })
 
 const selectTemplate = async () => {
-  const result = await window.ipcRenderer.invoke('select-file', {
-    properties: ['openFile'],
-    filters: [{ name: 'Word Documents', extensions: ['docx'] }]
-  })
-  if (!result.canceled && result.filePaths.length > 0) {
-    templatePath.value = result.filePaths[0]
-    await extractVariables(templatePath.value)
+  const result = await selectTemplateFile()
+  if (result) {
+    templatePath.value = result.path
+    templateName.value = result.name
+    await extractVariables(result.buffer)
+    await saveTemplateBuffer(result.buffer)
   }
 }
 
-const extractVariables = async (filePath: string) => {
+const extractVariables = async (buffer: ArrayBuffer) => {
   try {
-    const buffer = await window.ipcRenderer.invoke('read-file', filePath)
     const zip = new PizZip(buffer)
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
@@ -103,10 +102,11 @@ const extractVariables = async (filePath: string) => {
 const saveTemplateConfig = async () => {
   saving.value = true
   try {
-    const settings = await window.ipcRenderer.invoke('get-settings')
-    await window.ipcRenderer.invoke('save-settings', {
+    const settings = await getSettings()
+    await saveSettings({
       ...settings,
       templatePath: templatePath.value,
+      templateName: templateName.value,
       standardText: standardText.value,
       templateVariables: templateVariables.value
     })

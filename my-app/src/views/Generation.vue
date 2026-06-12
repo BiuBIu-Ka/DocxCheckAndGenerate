@@ -80,6 +80,7 @@ import { ElMessage } from 'element-plus'
 import OpenAI from 'openai'
 import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
+import { getSettings, getTemplateBuffer, saveGeneratedDocument } from '../utils/bridge'
 
 const referenceMaterials = ref('')
 const notes = ref('')
@@ -97,7 +98,7 @@ onMounted(async () => {
 
 const loadSettings = async () => {
   try {
-    appSettings = await window.ipcRenderer.invoke('get-settings')
+    appSettings = await getSettings()
     if (appSettings) {
       hasApiConfig.value = !!(appSettings.apiUrl && appSettings.apiKey && appSettings.modelName)
       hasTemplate.value = !!appSettings.templatePath
@@ -128,13 +129,11 @@ const generateDoc = async () => {
     currentStep.value = 1
     
     // Build JSON Schema hint based on docxtemplater tags
-    // It's a heuristic: tags starting with # indicate an array.
     const loops = templateVariables.value.filter(t => t.startsWith('#')).map(t => t.substring(1))
     const simpleVars = templateVariables.value.filter(t => !t.startsWith('#') && !t.startsWith('/'))
     
     let schemaHint = "请严格按照以下 JSON 格式输出数据：\n{\n"
     simpleVars.forEach(v => {
-      // If it's not part of a loop (basic assumption)
       schemaHint += `  "${v}": "对应内容",\n`
     })
     loops.forEach(l => {
@@ -166,7 +165,7 @@ ${referenceMaterials.value}
     const openai = new OpenAI({
       baseURL: appSettings.apiUrl,
       apiKey: appSettings.apiKey,
-      dangerouslyAllowBrowser: true // Since we are in Electron renderer with nodeIntegration
+      dangerouslyAllowBrowser: true // Web 端兼容必须开启
     })
 
     const completion = await openai.chat.completions.create({
@@ -189,7 +188,10 @@ ${referenceMaterials.value}
 
     // Step 3: Render Document
     currentStep.value = 3
-    const buffer = await window.ipcRenderer.invoke('read-file', appSettings.templatePath)
+    const buffer = await getTemplateBuffer(appSettings.templatePath)
+    if (!buffer) {
+      throw new Error('无法读取模板文件内容，请重新上传模板')
+    }
     const zip = new PizZip(buffer)
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
@@ -199,26 +201,18 @@ ${referenceMaterials.value}
     doc.render(aiData)
 
     const outZip = doc.getZip().generate({
-      type: 'nodebuffer',
+      type: 'uint8array',
       compression: 'DEFLATE',
     })
 
     // Step 4: Save Document
     currentStep.value = 4
-    const saveResult = await window.ipcRenderer.invoke('select-save-file', {
-      title: '保存生成的文档',
-      defaultPath: 'generated_document.docx',
-      filters: [{ name: 'Word Documents', extensions: ['docx'] }]
-    })
+    const success = await saveGeneratedDocument(outZip, 'generated_document.docx')
 
-    if (!saveResult.canceled && saveResult.filePath) {
-      await window.ipcRenderer.invoke('save-file', {
-        filePath: saveResult.filePath,
-        buffer: outZip
-      })
+    if (success) {
       ElMessage.success('文档生成并保存成功！')
     } else {
-      ElMessage.info('取消保存')
+      ElMessage.info('取消保存或保存失败')
     }
 
   } catch (error: any) {
