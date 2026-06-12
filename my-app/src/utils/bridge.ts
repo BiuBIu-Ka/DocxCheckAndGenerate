@@ -36,12 +36,20 @@ export async function selectTemplateFile(): Promise<{ path: string; name: string
     return new Promise((resolve) => {
       const input = document.createElement('input')
       input.type = 'file'
-      input.accept = '.docx'
-      input.onchange = async (e: any) => {
+      input.accept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      input.onchange = (e: any) => {
         const file = e.target.files[0]
         if (!file) return resolve(null)
-        const arrayBuffer = await file.arrayBuffer()
-        resolve({ path: 'web-template', name: file.name, buffer: arrayBuffer })
+        
+        const reader = new FileReader()
+        reader.onload = () => {
+          resolve({ path: 'web-template', name: file.name, buffer: reader.result as ArrayBuffer })
+        }
+        reader.onerror = () => {
+          console.error("Failed to read file in web")
+          resolve(null)
+        }
+        reader.readAsArrayBuffer(file)
       }
       input.click()
     })
