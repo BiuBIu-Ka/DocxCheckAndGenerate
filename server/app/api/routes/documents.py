@@ -147,7 +147,18 @@ async def upload_template_file(id: int, file: UploadFile = File(...), db: AsyncS
         if suffix == ".docx":
             try:
                 tpl = DocxTemplate(str(saved_path))
-                placeholders = list(tpl.get_undeclared_template_variables())
+                tpl.init_docx()
+                xml = tpl.get_xml()
+                
+                # Replace special docxtpl tags to allow Jinja2 parsing for variable extraction
+                import re
+                clean_xml = re.sub(r'\{%\s*(tr|p|tc)\s+', '{% ', xml)
+                
+                import jinja2
+                from jinja2 import meta
+                env = jinja2.Environment()
+                ast = env.parse(clean_xml)
+                placeholders = list(meta.find_undeclared_variables(ast))
             except Exception as e:
                 print(f"Failed to extract docxtpl variables: {e}")
                 
