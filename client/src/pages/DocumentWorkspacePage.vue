@@ -8,7 +8,8 @@ import {
   SafetyCertificateOutlined, 
   SaveOutlined, 
   UploadOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  DownOutlined
 } from '@ant-design/icons-vue'
 import axios from 'axios'
 
@@ -27,6 +28,9 @@ async function loadDocument() {
   try {
     const { data } = await axios.get(`/api/documents/${docId}`)
     document.value = data
+    if (data.structureJson) {
+      parsedStructure.value = JSON.parse(data.structureJson)
+    }
     if (['generating', 'reviewing'].includes(data.status)) {
       startPolling()
     } else {
@@ -64,7 +68,11 @@ async function handleUploadTemplate(info: any) {
   try {
     const { data } = await axios.post('/api/documents/parse-template', formData)
     parsedStructure.value = data.structure
-    message.success('模板解析成功，已识别章节')
+    // Auto save the structure
+    await axios.put(`/api/documents/${docId}`, {
+      structure_json: JSON.stringify(data.structure)
+    })
+    message.success('模板解析成功，章节结构已同步')
   } catch (e) {
     message.error('模板解析失败')
   }
@@ -107,9 +115,10 @@ async function handleReview() {
 async function handleSave() {
   try {
     await axios.put(`/api/documents/${docId}`, {
-      content_json: document.value.contentJson
+      content_json: document.value.contentJson,
+      structure_json: JSON.stringify(parsedStructure.value)
     })
-    message.success('保存成功')
+    message.success('模板已成功保存')
   } catch (e) {
     message.error('保存失败')
   }
@@ -133,6 +142,17 @@ const getIssues = () => {
   }
 }
 
+function getStatusLabel(status: string) {
+  const map: any = {
+    draft: '编辑中',
+    generating: '解析中',
+    reviewing: '验证中',
+    completed: '已就绪',
+    error: '异常'
+  }
+  return map[status] || status
+}
+
 onMounted(loadDocument)
 onUnmounted(stopPolling)
 </script>
@@ -142,36 +162,48 @@ onUnmounted(stopPolling)
     <div class="flex justify-between items-center bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
       <div>
         <div class="flex items-center gap-3">
-          <h2 class="text-2xl font-bold m-0">{{ document.title }}</h2>
+          <h2 class="text-2xl font-bold m-0">{{ document.title }} <span class="text-gray-400 font-normal">(模板)</span></h2>
           <a-tag :color="document.status === 'completed' ? 'success' : 'processing'">
-            {{ document.status }}
+            {{ getStatusLabel(document.status) }}
           </a-tag>
         </div>
-        <div class="text-gray-500 mt-1">{{ document.projectName }} · {{ document.docType }}</div>
+        <div class="text-gray-500 mt-1">适用项目：{{ document.projectName }} · 类型：{{ document.docType }}</div>
       </div>
       <div class="flex gap-3">
-        <a-button @click="handleSave"><template #icon><SaveOutlined /></template>保存修改</a-button>
-        <a-button type="primary" :loading="actionLoading" @click="handleGenerate">
-          <template #icon><RocketOutlined /></template>AI 生成
-        </a-button>
-        <a-button type="primary" ghost :loading="actionLoading" @click="handleReview">
-          <template #icon><SafetyCertificateOutlined /></template>智能审查
-        </a-button>
+        <a-button @click="handleSave"><template #icon><SaveOutlined /></template>保存模板</a-button>
+        <a-dropdown>
+          <template #overlay>
+            <a-menu>
+              <a-menu-item key="gen" @click="handleGenerate">
+                <RocketOutlined /> 基于此模板生成文档
+              </a-menu-item>
+              <a-menu-item key="rev" @click="handleReview">
+                <SafetyCertificateOutlined /> 基于此模板审查文档
+              </a-menu-item>
+            </a-menu>
+          </template>
+          <a-button type="primary">
+            使用模板 <DownOutlined />
+          </a-button>
+        </a-dropdown>
       </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
       <div class="lg:col-span-1 space-y-6">
-        <a-card title="章节模板控制" size="small">
+        <a-card title="模板结构解析" size="small">
           <a-upload-dragger :multiple="false" :customRequest="handleUploadTemplate" class="mb-4">
-            <p class="ant-upload-text text-xs">上传 .docx 提取结构</p>
+            <template #icon><UploadOutlined /></template>
+            <p class="ant-upload-text">点击或拖拽 Word 模板到此处</p>
+            <p class="ant-upload-hint text-xs">系统将自动解析 Heading 样式并提取章节树</p>
           </a-upload-dragger>
           <div v-if="parsedStructure.length" class="space-y-1">
-            <div v-for="s in parsedStructure" :key="s.title" class="text-xs p-2 bg-blue-50 rounded text-blue-700">
+            <div class="text-xs font-bold mb-2 text-gray-500">解析出的章节预览：</div>
+            <div v-for="s in parsedStructure" :key="s.title" class="text-xs p-2 bg-blue-50 rounded text-blue-700 border border-blue-100 truncate">
               {{ s.title }}
             </div>
           </div>
-          <a-empty v-else description="暂无章节结构" />
+          <a-empty v-else description="请上传 .docx 模板文件" />
         </a-card>
 
         <a-card v-if="document.reviewScore !== null" title="质量概览" size="small">

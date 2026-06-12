@@ -40,6 +40,7 @@ class Document(Base):
     project_name = Column(String, index=True)
     doc_type = Column(String)
     status = Column(String, default="draft")  # draft, generating, reviewing, completed
+    structure_json = Column(Text)  # JSON string of parsed structure
     content_json = Column(Text)  # JSON string of sections
     review_score = Column(Integer)
     review_summary = Column(Text)

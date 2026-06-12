@@ -16,7 +16,7 @@ const router = useRouter()
 
 const items = [
   { key: '/', icon: () => h(HomeOutlined), label: '工作台' },
-  { key: '/documents', icon: () => h(BookOutlined), label: '文档管理' },
+  { key: '/documents', icon: () => h(BookOutlined), label: '模板管理' },
   { key: '/knowledge', icon: () => h(FolderOpenOutlined), label: '知识库管理' },
   { key: '/models', icon: () => h(SettingOutlined), label: '模型设置' },
   { key: '/help', icon: () => h(QuestionCircleOutlined), label: '帮助中心' },

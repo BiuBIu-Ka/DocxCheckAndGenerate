@@ -35,6 +35,7 @@ class DocumentCreate(DocumentBase):
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     status: Optional[str] = None
+    structure_json: Optional[str] = Field(None, alias="structureJson")
     content_json: Optional[str] = Field(None, alias="contentJson")
     review_score: Optional[int] = Field(None, alias="reviewScore")
     review_summary: Optional[str] = Field(None, alias="reviewSummary")
@@ -45,6 +46,7 @@ class DocumentUpdate(BaseModel):
 class DocumentSchema(DocumentBase):
     id: int
     status: str
+    structure_json: Optional[str] = Field(None, alias="structureJson")
     content_json: Optional[str] = Field(None, alias="contentJson")
     review_score: Optional[int] = Field(None, alias="reviewScore")
     review_summary: Optional[str] = Field(None, alias="reviewSummary")
@@ -88,12 +90,76 @@ class TermSchema(TermBaseSchema):
     
     model_config = {"populate_by_name": True, "from_attributes": True}
 
-# Legacy / Utils
+# Model Providers
 class ModelProviderResponse(BaseModel):
-    id: int
-    name: str
+    id: Optional[int] = None
+    name: Optional[str] = None
     provider: str
-    base_url: str
-    model_name: str
-    is_default: bool
-    last_status: Optional[str] = "unknown"
+    base_url: Optional[str] = Field(None, alias="baseUrl")
+    endpoint: Optional[str] = None # For status service
+    model_name: Optional[str] = Field(None, alias="modelName")
+    model: Optional[str] = None # For status service
+    is_default: bool = Field(False, alias="isDefault")
+    default: bool = False # For status service
+    status: Optional[str] = "unknown"
+    last_status: Optional[str] = Field(None, alias="lastStatus")
+
+    model_config = {"populate_by_name": True, "from_attributes": True}
+
+# Runtime Status
+class RuntimeVersionInfo(BaseModel):
+    node: str
+    npm: str
+    python: str
+    git: str
+
+class RuntimeServiceStatus(BaseModel):
+    name: str
+    status: str
+    detail: str
+
+class EnvironmentStatusResponse(BaseModel):
+    platform: str
+    workspace: str
+    branch: str
+    commit: str
+    versions: RuntimeVersionInfo
+    services: List[RuntimeServiceStatus]
+
+class CodeStatusResponse(BaseModel):
+    branch: str
+    commit: str
+    dirty: bool
+    changed_files: int = Field(alias="changedFiles")
+    untracked_files: int = Field(alias="untrackedFiles")
+    client_pages: int = Field(alias="clientPages")
+    client_components: int = Field(alias="clientComponents")
+    server_routes: int = Field(alias="serverRoutes")
+    server_tests: int = Field(alias="serverTests")
+    
+    model_config = {"populate_by_name": True}
+
+class KnowledgeAssetSummary(BaseModel):
+    category: str
+    count: int
+    description: str
+
+class EnvironmentSummaryResponse(BaseModel):
+    environment: EnvironmentStatusResponse
+    code: CodeStatusResponse
+    model_providers: List[ModelProviderResponse] = Field(alias="modelProviders")
+    knowledge_assets: List[KnowledgeAssetSummary] = Field(alias="knowledgeAssets")
+    
+    model_config = {"populate_by_name": True}
+
+# Manuals
+class ManualDraftRequest(BaseModel):
+    target_module: str = Field(alias="targetModule")
+    target_audience: str = Field(alias="targetAudience")
+    screenshots: List[str]
+
+    model_config = {"populate_by_name": True}
+
+class ManualDraftResponse(BaseModel):
+    title: str
+    paragraphs: List[str]

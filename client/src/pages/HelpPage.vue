@@ -18,14 +18,14 @@ import {
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <!-- 快速入门 -->
-      <a-card title="1. 快速入门：文档生命周期" :bordered="false" class="shadow-sm">
+      <a-card title="1. 快速入门：模板与文档流程" :bordered="false" class="shadow-sm">
         <template #extra><ThunderboltOutlined class="text-yellow-500" /></template>
         <a-steps direction="vertical" size="small" :current="5">
-          <a-step title="新建文档" description="在‘文档管理’中创建新实例，选择 SRS/SDD/STP 类型。" />
-          <a-step title="配置模板" description="进入工作台，上传您的 Word 模板或使用系统内置 GJB 438B 结构。" />
-          <a-step title="智能编制" description="利用 AI 根据章节要求自动生成初稿，或手动编辑内容。" />
-          <a-step title="合规审查" description="一键启动智能审查，AI 将根据 GJB 规则库检查章节完整性与用词规范。" />
-          <a-step title="导出文档" description="确认内容无误后，将编制结果导出为标准的 .docx 文件。" />
+          <a-step title="定义模板" description="在‘模板管理’中创建新模板，上传您的 Word 原始文件进行解析。" />
+          <a-step title="维护模板" description="进入模板工作台，确认解析出的章节结构，并配置各章节的编制基准。" />
+          <a-step title="使用模板生成" description="选择成熟模板，点击‘使用模板 -> 基于此模板生成文档’，AI 将根据模板基准自动编制。" />
+          <a-step title="使用模板审查" description="上传待审文档，点击‘使用模板 -> 基于此模板审查文档’，系统将根据模板基线进行合规性对比。" />
+          <a-step title="导出与交付" description="确认内容无误后，将结果导出为标准的 .docx 文件。" />
         </a-steps>
       </a-card>
 
@@ -38,8 +38,8 @@ import {
               <DatabaseOutlined />
             </div>
             <div>
-              <div class="font-bold">知识库维护</div>
-              <div class="text-sm text-gray-500">开放式维护 GJB 审查规则。您可以自定义每个章节的必选性、编写建议以及行业术语禁用词。</div>
+              <div class="font-bold">模板库管理</div>
+              <div class="text-sm text-gray-500">不再是死板的列表，您可以上传任何 GJB 438B Word 模板，系统会自动提取标题并允许您配置每个章节的编写规则。</div>
             </div>
           </div>
           <div class="flex gap-3">
@@ -47,8 +47,8 @@ import {
               <SafetyCertificateOutlined />
             </div>
             <div>
-              <div class="font-bold">GJB 438B 规则引擎</div>
-              <div class="text-sm text-gray-500">系统内置了深度解析器，能够识别 Word 标题级别，确保生成的文档结构严丝合缝地符合国军标要求。</div>
+              <div class="font-bold">智能解析引擎</div>
+              <div class="text-sm text-gray-500">系统能够识别 Word 文档中的‘标题’样式，将其转化为可操作的树状结构，并支持通过代码逻辑进行规则匹配。</div>
             </div>
           </div>
         </div>

@@ -91,10 +91,10 @@ function getStatusColor(status: string) {
 
 function getStatusLabel(status: string) {
   const map: any = {
-    draft: '草稿',
-    generating: '编制中',
-    reviewing: '审查中',
-    completed: '已归档',
+    draft: '编辑中',
+    generating: '解析中',
+    reviewing: '验证中',
+    completed: '已就绪',
     error: '异常'
   }
   return map[status] || status
@@ -110,13 +110,13 @@ onMounted(loadDocuments)
       <div>
         <h2 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <FileTextOutlined class="text-blue-500" />
-          文档管理中心
+          模板管理中心
         </h2>
-        <p class="text-gray-500 mt-1">管理并维护您的 GJB 438B 软件研制文档，支持全生命周期跟踪。</p>
+        <p class="text-gray-500 mt-1">定义并维护 GJB 438B 研制模板，支持 Word 模板解析与章节要求配置。</p>
       </div>
       <a-button type="primary" size="large" @click="modalVisible = true" class="shadow-md">
         <template #icon><PlusOutlined /></template>
-        新建研制文档
+        创建研制模板
       </a-button>
     </div>
 
@@ -124,7 +124,7 @@ onMounted(loadDocuments)
     <div class="bg-white p-4 rounded-lg border border-gray-100 flex gap-4 items-center shadow-sm">
       <a-input-search
         v-model:value="searchText"
-        placeholder="搜索文档名称或项目名称..."
+        placeholder="搜索模板名称或关联项目..."
         style="width: 300px"
         @search="loadDocuments"
       />
@@ -139,11 +139,11 @@ onMounted(loadDocuments)
     <!-- 表格区域 -->
     <a-table 
       :columns="[
-        { title: '文档名称', key: 'title', width: '30%' },
-        { title: '项目/型号', key: 'projectName', width: '20%' },
-        { title: '类型', dataIndex: 'docType', key: 'docType', width: 100 },
-        { title: '当前状态', key: 'status', width: 120 },
-        { title: '质量评分', key: 'reviewScore', width: 100 },
+        { title: '模板名称', key: 'title', width: '30%' },
+        { title: '关联项目', key: 'projectName', width: '20%' },
+        { title: '文档类型', dataIndex: 'docType', key: 'docType', width: 100 },
+        { title: '模板状态', key: 'status', width: 120 },
+        { title: '质量基线', key: 'reviewScore', width: 100 },
         { title: '更新时间', key: 'updatedAt', width: 180 },
         { title: '操作', key: 'action', width: 180, fixed: 'right' }
       ]" 
@@ -208,19 +208,19 @@ onMounted(loadDocuments)
     </a-table>
 
     <!-- 新建 Modal -->
-    <a-modal v-model:open="modalVisible" title="新建研制文档" @ok="handleCreate" :confirm-loading="loading">
+    <a-modal v-model:open="modalVisible" title="创建研制模板" @ok="handleCreate" :confirm-loading="loading">
       <a-form layout="vertical">
-        <a-form-item label="文档名称" required help="例如：某分系统软件需求规格说明书">
-          <a-input v-model:value="formState.title" placeholder="请输入完整文档标题" />
+        <a-form-item label="模板名称" required help="例如：通用软件需求规格说明书模板">
+          <a-input v-model:value="formState.title" placeholder="请输入模板标题" />
         </a-form-item>
-        <a-form-item label="所属项目/型号" required>
-          <a-input v-model:value="formState.projectName" placeholder="请输入关联的项目或型号名称" />
+        <a-form-item label="关联项目/型号" required>
+          <a-input v-model:value="formState.projectName" placeholder="该模板主要适用的项目或型号" />
         </a-form-item>
         <a-form-item label="文档标准/类型" required>
           <a-radio-group v-model:value="formState.docType" button-style="solid">
-            <a-radio-button value="SRS">需求 (SRS)</a-radio-button>
-            <a-radio-button value="SDD">设计 (SDD)</a-radio-button>
-            <a-radio-button value="STP">测试 (STP)</a-radio-button>
+            <a-radio-button value="SRS">需求模板 (SRS)</a-radio-button>
+            <a-radio-button value="SDD">设计模板 (SDD)</a-radio-button>
+            <a-radio-button value="STP">测试模板 (STP)</a-radio-button>
           </a-radio-group>
         </a-form-item>
       </a-form>
