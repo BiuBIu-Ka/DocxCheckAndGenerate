@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.db.models import Document, GjbRule, TermBase
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentSchema
 from app.services.docx_parser import docx_parser
+from app.services.template_docx_service import template_docx_service
 from typing import List
 from pathlib import Path
 import shutil
@@ -17,6 +18,7 @@ import json
 from docx import Document as DocxDocument
 
 router = APIRouter()
+STORAGE_ROOT = Path(__file__).resolve().parents[3] / "storage" / "templates"
 
 
 async def build_template_knowledge_snapshot(db: AsyncSession, doc_type: str) -> tuple[str, str]:
@@ -62,6 +64,16 @@ def validate_json_payload(field_name: str, value: str | None) -> None:
 
     if field_name in {"structureJson", "rulesJson", "termsJson"} and not isinstance(parsed, list):
         raise HTTPException(status_code=400, detail=f"{field_name} 必须为数组结构。")
+
+
+def save_template_file(document_id: int, file: UploadFile) -> Path:
+    template_dir = STORAGE_ROOT / str(document_id)
+    template_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(file.filename or "").suffix.lower() or ".docx"
+    target_path = template_dir / f"source{suffix}"
+    with target_path.open("wb") as target:
+        shutil.copyfileobj(file.file, target)
+    return target_path
 
 @router.get("", response_model=List[DocumentSchema])
 async def list_documents(db: AsyncSession = Depends(get_db)):
@@ -109,7 +121,38 @@ async def delete_document(id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Document not found")
     await db.delete(db_doc)
     await db.commit()
+    template_dir = STORAGE_ROOT / str(id)
+    if template_dir.exists():
+        shutil.rmtree(template_dir, ignore_errors=True)
     return {"success": True}
+
+
+@router.post("/{id}/template-file", response_model=DocumentSchema)
+async def upload_template_file(id: int, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    db_doc = await db.get(Document, id)
+    if not db_doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix != ".docx":
+        raise HTTPException(status_code=400, detail="模板解析仅支持 .docx 文件，请上传 Word 模板。")
+
+    try:
+        saved_path = save_template_file(id, file)
+        parsed = docx_parser.parse_template(str(saved_path))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"模板解析失败，请确认文件是有效的 Word .docx 模板: {exc}") from exc
+
+    db_doc.template_file_name = filename
+    db_doc.template_file_path = str(saved_path)
+    db_doc.template_html = parsed["html"]
+    db_doc.structure_json = json.dumps(parsed["structure"], ensure_ascii=False)
+    await db.commit()
+    await db.refresh(db_doc)
+    return db_doc
 
 
 @router.get("/{id}/export-docx")
@@ -125,22 +168,37 @@ async def export_document_docx(id: int, db: AsyncSession = Depends(get_db)):
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="文档内容损坏，无法导出。") from exc
 
-    export_doc = DocxDocument()
-    export_doc.add_heading(db_doc.title, 0)
-    export_doc.add_paragraph(f"项目：{db_doc.project_name}")
-    export_doc.add_paragraph(f"文档类型：{db_doc.doc_type}")
-    if db_doc.generation_prompt:
-        export_doc.add_paragraph(f"生成要求：{db_doc.generation_prompt}")
-
-    for title, body in content_map.items():
-        export_doc.add_heading(str(title), level=1)
-        for paragraph in str(body).splitlines() or [""]:
-            export_doc.add_paragraph(paragraph)
-
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
     temp_path = temp_file.name
     temp_file.close()
-    export_doc.save(temp_path)
+    structure = []
+    if db_doc.structure_json:
+        try:
+            structure = json.loads(db_doc.structure_json)
+        except json.JSONDecodeError:
+            structure = []
+
+    template_path = Path(db_doc.template_file_path) if db_doc.template_file_path else None
+    if template_path and template_path.exists():
+        template_docx_service.export_with_template(
+            str(template_path),
+            temp_path,
+            content_map,
+            structure,
+        )
+    else:
+        export_doc = DocxDocument()
+        export_doc.add_heading(db_doc.title, 0)
+        export_doc.add_paragraph(f"项目：{db_doc.project_name}")
+        export_doc.add_paragraph(f"文档类型：{db_doc.doc_type}")
+        if db_doc.generation_prompt:
+            export_doc.add_paragraph(f"生成要求：{db_doc.generation_prompt}")
+
+        for title, body in content_map.items():
+            export_doc.add_heading(str(title), level=1)
+            for paragraph in str(body).splitlines() or [""]:
+                export_doc.add_paragraph(paragraph)
+        export_doc.save(temp_path)
     download_name = f"{db_doc.title or 'generated-document'}.docx"
     return FileResponse(
         temp_path,

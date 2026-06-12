@@ -43,6 +43,7 @@ interface TemplateDocument {
   docType: string
   status: string
   templateFileName?: string | null
+  templateFilePath?: string | null
   templateHtml?: string | null
   structureJson?: string | null
   rulesJson?: string | null
@@ -68,6 +69,7 @@ const templateRules = ref<TemplateRule[]>([])
 const templateTerms = ref<TemplateTerm[]>([])
 const templateHtml = ref('')
 const templateEditor = ref<HTMLElement | null>(null)
+const structureEditorText = ref('[]')
 const generationModalVisible = ref(false)
 const generationFileList = ref<any[]>([])
 const generationForm = reactive({
@@ -119,12 +121,46 @@ async function syncTemplateEditor() {
   }
 }
 
+function syncStructureEditor() {
+  structureEditorText.value = JSON.stringify(parsedStructure.value, null, 2)
+}
+
 function handleTemplateHtmlInput(event: Event) {
   templateHtml.value = (event.target as HTMLElement).innerHTML
 }
 
 function handleGenerationFileChange(info: any) {
   generationFileList.value = info.fileList || []
+}
+
+function getGenerationSources() {
+  if (!templateDocument.value?.generationSourcesJson) return []
+  try {
+    const parsed = JSON.parse(templateDocument.value.generationSourcesJson)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function applyStructureEditor() {
+  try {
+    const parsed = JSON.parse(structureEditorText.value)
+    if (!Array.isArray(parsed)) {
+      message.error('章节结构必须是数组 JSON')
+      return
+    }
+    parsedStructure.value = parsed
+    message.success('章节结构已更新到当前模板草稿')
+  } catch {
+    message.error('章节结构 JSON 格式错误')
+  }
+}
+
+function rebuildStructureFromTemplate() {
+  parsedStructure.value = buildStructureFromHtml(templateHtml.value)
+  syncStructureEditor()
+  message.success('已根据当前模板可视内容重建章节结构')
 }
 
 async function loadDocument() {
@@ -137,6 +173,7 @@ async function loadDocument() {
     parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
     templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
     templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
+    syncStructureEditor()
     await syncTemplateEditor()
     if (['generating', 'reviewing'].includes(data.status)) {
       startPolling()
@@ -161,6 +198,7 @@ function startPolling() {
       parsedStructure.value = safeParseArray<TemplateStructureItem>(data.structureJson)
       templateRules.value = safeParseArray<TemplateRule>(data.rulesJson)
       templateTerms.value = safeParseArray<TemplateTerm>(data.termsJson)
+      syncStructureEditor()
       await syncTemplateEditor()
       if (!['generating', 'reviewing'].includes(data.status)) {
         stopPolling()
@@ -186,17 +224,15 @@ async function handleUploadTemplate(info: any) {
   const formData = new FormData()
   formData.append('file', info.file)
   try {
-    const { data } = await axios.post('/api/documents/parse-template', formData)
-    parsedStructure.value = data.structure
-    templateHtml.value = data.html || ''
-    const { data: updated } = await axios.put(`/api/documents/${docId}`, {
-      structureJson: JSON.stringify(data.structure),
-      templateHtml: data.html || '',
-      templateFileName: data.templateFileName
+    const { data: updated } = await axios.post(`/api/documents/${docId}/template-file`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
     templateDocument.value = updated
+    parsedStructure.value = safeParseArray<TemplateStructureItem>(updated.structureJson)
+    templateHtml.value = updated.templateHtml || ''
+    syncStructureEditor()
     await syncTemplateEditor()
-    info.onSuccess?.(data, info.file)
+    info.onSuccess?.(updated, info.file)
     message.success('模板已替换并解析完成')
   } catch (e: any) {
     const detail = e?.response?.data?.detail || e?.message || '模板解析失败'
@@ -290,16 +326,17 @@ async function handleExportDocx() {
 
 async function handleSave() {
   try {
-    const derivedStructure = buildStructureFromHtml(templateHtml.value)
+    const derivedStructure = parsedStructure.value.length ? parsedStructure.value : buildStructureFromHtml(templateHtml.value)
     parsedStructure.value = derivedStructure
-    await axios.put(`/api/documents/${docId}`, {
-      contentJson: templateDocument.value?.contentJson ?? null,
+    syncStructureEditor()
+    const { data } = await axios.put(`/api/documents/${docId}`, {
       templateHtml: templateHtml.value,
       structureJson: JSON.stringify(derivedStructure),
       rulesJson: JSON.stringify(templateRules.value),
       termsJson: JSON.stringify(templateTerms.value),
       templateFileName: templateDocument.value?.templateFileName ?? null
     })
+    templateDocument.value = data
     message.success('模板已成功保存')
   } catch (e) {
     message.error('保存失败')
@@ -447,7 +484,7 @@ watch(activeTab, async (tab) => {
 
       <div class="lg:col-span-3">
         <a-tabs v-model:activeKey="activeTab" type="card" class="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-          <a-tab-pane key="content" tab="文档正文">
+          <a-tab-pane key="content" tab="生成文档">
             <div v-if="templateDocument.status === 'generating'" class="flex flex-col items-center py-20">
                <LoadingOutlined style="font-size: 40px" class="text-blue-500 mb-4" />
                <div class="text-gray-500">AI 正在努力编制中，请稍候...</div>
@@ -463,10 +500,35 @@ watch(activeTab, async (tab) => {
             <a-empty v-else description="文档暂无内容，请点击“AI 生成”或手动编辑" class="py-20" />
           </a-tab-pane>
 
+          <a-tab-pane key="structure" tab="模板章节维护">
+            <div class="space-y-4">
+              <a-alert
+                type="info"
+                show-icon
+                message="这里维护的是模板章节基线，不是生成结果正文。你可以直接修改解析后的结构 JSON，保存后后续生成将按这里的章节执行。"
+              />
+              <div class="flex gap-3">
+                <a-button @click="rebuildStructureFromTemplate">根据模板版式重建章节</a-button>
+                <a-button type="primary" ghost @click="applyStructureEditor">应用当前结构修改</a-button>
+              </div>
+              <a-textarea
+                v-model:value="structureEditorText"
+                :rows="18"
+                placeholder="请维护模板章节 JSON 结构"
+              />
+              <div v-if="parsedStructure.length" class="space-y-2">
+                <div class="text-sm font-medium text-gray-600">当前章节预览</div>
+                <div class="flex flex-wrap gap-2">
+                  <a-tag v-for="item in parsedStructure" :key="item.title" color="blue">{{ item.title }}</a-tag>
+                </div>
+              </div>
+            </div>
+          </a-tab-pane>
+
           <a-tab-pane key="template" tab="模板可视编辑">
             <div class="space-y-4">
               <div class="text-sm text-gray-500">
-                当前模板文件会被转换为 HTML 可视内容。你可以直接在下面继续修改，保存后系统会反推章节结构并作为模板基线保存。
+                当前模板文件会被转换为 HTML 可视内容。你可以直接在下面继续修改版式、标题和正文骨架；保存后这些修改会作为模板基线参与后续生成。
               </div>
               <div
                 ref="templateEditor"
@@ -474,6 +536,28 @@ watch(activeTab, async (tab) => {
                 class="min-h-[520px] rounded-lg border border-gray-200 bg-white p-6 outline-none focus:border-blue-500 whitespace-normal"
                 @input="handleTemplateHtmlInput"
               />
+            </div>
+          </a-tab-pane>
+
+          <a-tab-pane key="sources" tab="参考材料">
+            <div class="space-y-4">
+              <a-alert
+                type="info"
+                show-icon
+                message="这里展示的是上一次生成时上传的参考材料摘要，它们只作为生成依据，不会覆盖模板本身。模板修改请在“模板可视编辑”和“模板章节维护”中完成。"
+              />
+              <div v-if="getGenerationSources().length" class="space-y-3">
+                <div
+                  v-for="item in getGenerationSources()"
+                  :key="item.filename"
+                  class="rounded-lg border border-gray-200 bg-gray-50 p-4"
+                >
+                  <div class="font-medium text-gray-800">{{ item.filename }}</div>
+                  <div class="text-xs text-gray-500 mt-1">抽取字符数：{{ item.chars || 0 }}</div>
+                  <div class="text-sm text-gray-600 mt-3 whitespace-pre-wrap">{{ item.excerpt || '无可展示摘要' }}</div>
+                </div>
+              </div>
+              <a-empty v-else description="当前还没有生成参考材料记录" />
             </div>
           </a-tab-pane>
 

@@ -41,6 +41,7 @@ class Document(Base):
     doc_type = Column(String)
     status = Column(String, default="draft")  # draft, generating, reviewing, completed
     template_file_name = Column(String)
+    template_file_path = Column(String)
     template_html = Column(Text)
     structure_json = Column(Text)  # JSON string of parsed structure
     rules_json = Column(Text)  # JSON string of template-scoped rules
