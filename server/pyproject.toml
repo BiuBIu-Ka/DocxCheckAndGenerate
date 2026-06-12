@@ -7,7 +7,9 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",
   "pydantic>=2.8.0",
-  "python-multipart>=0.0.9"
+  "python-multipart>=0.0.9",
+  "olefile>=0.47",
+  "unword @ git+https://github.com/dridk/unword.git@b0edf7f6edaba0c4c589c3d291c6112a150b110c"
 ]
 
 [project.optional-dependencies]

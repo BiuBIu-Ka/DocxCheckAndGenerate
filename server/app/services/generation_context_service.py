@@ -8,6 +8,7 @@ import zipfile
 from docx import Document as DocxDocument
 
 from app.services.pdf_parser import pdf_parser
+from app.services.word_template_parser import word_template_parser
 
 
 TEXT_EXTENSIONS = {
@@ -44,6 +45,8 @@ class GenerationContextService:
             return pdf_parser.parse_text(file_path)
         if suffix == ".docx":
             return self._extract_docx_text(file_path)
+        if suffix == ".doc":
+            return word_template_parser.extract_text(file_path, filename)
         if suffix == ".zip":
             return self._extract_zip_text(file_path)
         if suffix in TEXT_EXTENSIONS:

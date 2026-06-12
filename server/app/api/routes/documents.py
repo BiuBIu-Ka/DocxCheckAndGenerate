@@ -7,7 +7,7 @@ from sqlalchemy.future import select
 from app.db.database import get_db
 from app.db.models import Document, GjbRule, TermBase
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentSchema
-from app.services.docx_parser import docx_parser
+from app.services.word_template_parser import word_template_parser
 from app.services.template_docx_service import template_docx_service
 from typing import List
 from pathlib import Path
@@ -135,12 +135,12 @@ async def upload_template_file(id: int, file: UploadFile = File(...), db: AsyncS
 
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
-    if suffix != ".docx":
-        raise HTTPException(status_code=400, detail="模板解析仅支持 .docx 文件，请上传 Word 模板。")
+    if suffix not in {".doc", ".docx"}:
+        raise HTTPException(status_code=400, detail="模板解析仅支持 .doc 或 .docx 文件，请上传 Word 模板。")
 
     try:
         saved_path = save_template_file(id, file)
-        parsed = docx_parser.parse_template(str(saved_path))
+        parsed = word_template_parser.parse_template(str(saved_path), filename)
     except HTTPException:
         raise
     except Exception as exc:
@@ -179,7 +179,7 @@ async def export_document_docx(id: int, db: AsyncSession = Depends(get_db)):
             structure = []
 
     template_path = Path(db_doc.template_file_path) if db_doc.template_file_path else None
-    if template_path and template_path.exists():
+    if template_path and template_path.exists() and template_path.suffix.lower() == ".docx":
         template_docx_service.export_with_template(
             str(template_path),
             temp_path,
@@ -225,8 +225,8 @@ async def sync_document_knowledge(id: int, db: AsyncSession = Depends(get_db)):
 async def parse_template(file: UploadFile = File(...)):
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
-    if suffix != ".docx":
-        raise HTTPException(status_code=400, detail="模板解析仅支持 .docx 文件，请上传 Word 模板。")
+    if suffix not in {".doc", ".docx"}:
+        raise HTTPException(status_code=400, detail="模板解析仅支持 .doc 或 .docx 文件，请上传 Word 模板。")
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     temp_path = temp_file.name
@@ -239,11 +239,13 @@ async def parse_template(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"模板文件保存失败: {exc}") from exc
 
     try:
-        parsed = docx_parser.parse_template(temp_path)
+        parsed = word_template_parser.parse_template(temp_path, filename)
         return {
             "structure": parsed["structure"],
             "html": parsed["html"],
             "templateFileName": filename,
+            "parserKind": parsed.get("parserKind"),
+            "fidelity": parsed.get("fidelity"),
         }
     except HTTPException:
         raise
