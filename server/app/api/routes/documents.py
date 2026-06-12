@@ -187,6 +187,8 @@ async def export_document_docx(id: int, db: AsyncSession = Depends(get_db)):
             structure,
         )
     else:
+        # For .doc templates, we cannot use them as a native style base, but we can still 
+        # export the markdown formatted content properly into a new .docx.
         export_doc = DocxDocument()
         export_doc.add_heading(db_doc.title, 0)
         export_doc.add_paragraph(f"项目：{db_doc.project_name}")
@@ -195,9 +197,10 @@ async def export_document_docx(id: int, db: AsyncSession = Depends(get_db)):
             export_doc.add_paragraph(f"生成要求：{db_doc.generation_prompt}")
 
         for title, body in content_map.items():
-            export_doc.add_heading(str(title), level=1)
-            for paragraph in str(body).splitlines() or [""]:
-                export_doc.add_paragraph(paragraph)
+            heading = export_doc.add_heading(str(title), level=1)
+            # Use the new markdown insertion method
+            template_docx_service._insert_markdown_after(heading, str(body))
+            
         export_doc.save(temp_path)
     download_name = f"{db_doc.title or 'generated-document'}.docx"
     return FileResponse(

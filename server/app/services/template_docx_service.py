@@ -7,6 +7,8 @@ from typing import Any
 from docx import Document as DocxDocument
 from docx.oxml import OxmlElement
 from docx.text.paragraph import Paragraph
+import markdown
+from htmldocx import HtmlToDocx
 
 
 class TemplateDocxService:
@@ -58,18 +60,26 @@ class TemplateDocxService:
         if parent is not None:
             parent.remove(element)
 
-    def _insert_paragraph_after(self, paragraph: Paragraph, text: str, style_name: str | None) -> Paragraph:
-        new_p = OxmlElement("w:p")
-        paragraph._p.addnext(new_p)
-        new_paragraph = Paragraph(new_p, paragraph._parent)
-        if style_name:
-            try:
-                new_paragraph.style = style_name
-            except Exception:
-                pass
-        if text:
-            new_paragraph.add_run(text)
-        return new_paragraph
+    def _insert_markdown_after(self, anchor: Paragraph, text: str) -> Paragraph:
+        temp_doc = DocxDocument()
+        html = markdown.markdown(
+            text,
+            extensions=["tables", "fenced_code", "sane_lists", "nl2br"]
+        )
+        parser = HtmlToDocx()
+        parser.add_html_to_document(html, temp_doc)
+
+        current_anchor_el = anchor._p
+        for child in list(temp_doc.element.body):
+            if child.tag.endswith('sectPr'):
+                continue
+            current_anchor_el.addnext(child)
+            current_anchor_el = child
+
+        # Find the last inserted element as a paragraph (if we need to return something, 
+        # though returning the last paragraph might be complex if it's a table, 
+        # but we don't strictly need to return it).
+        return anchor
 
     def _replace_section_body(
         self,
@@ -86,10 +96,7 @@ class TemplateDocxService:
             self._remove_paragraph(paragraph)
 
         anchor = list(doc.paragraphs)[start]
-        style_name = section.get("body_style") or "Normal"
-        lines = str(body).splitlines() or [""]
-        for line in lines:
-            anchor = self._insert_paragraph_after(anchor, line, style_name)
+        self._insert_markdown_after(anchor, str(body))
 
     def _infer_heading_style(self, title: str) -> str:
         if re.match(r"^\d+\.\d+\.\d+", title):
@@ -117,11 +124,7 @@ class TemplateDocxService:
 
             heading = doc.add_paragraph(style=self._infer_heading_style(str(title)))
             heading.add_run(str(title))
-            body_style = "Normal"
-            for line in str(body).splitlines() or [""]:
-                paragraph = doc.add_paragraph(style=body_style)
-                if line:
-                    paragraph.add_run(line)
+            self._insert_markdown_after(heading, str(body))
 
         doc.save(output_path)
 
