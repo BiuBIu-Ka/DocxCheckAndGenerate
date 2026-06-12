@@ -709,7 +709,7 @@ watch(activeTab, async (tab) => {
                 message="系统已从模板文件中提取出需要 AI 填写的占位符。AI 将在生成时自动推断数据结构并提取内容填入。"
               />
               <div v-if="getPlaceholders().length" class="flex flex-wrap gap-2">
-                <a-tag v-for="item in getPlaceholders()" :key="item" color="purple">{{ '{{ ' + item + ' }}' }}</a-tag>
+                <a-tag v-for="item in getPlaceholders()" :key="item" color="purple">{{ '\{\{ ' + item + ' \}\}' }}</a-tag>
               </div>
               <a-empty v-else description="当前模板未检测到 Jinja2 占位符变量" />
               
