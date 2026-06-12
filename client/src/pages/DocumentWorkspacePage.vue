@@ -719,6 +719,15 @@ watch(activeTab, async (tab) => {
                   <ul class="list-disc pl-5">
                     <li><strong>表格行循环</strong>：在 Word 表格的某一行首尾加入 <code>{% tr for item in features %}</code> 和 <code>{% tr endfor %}</code>，中间单元格写 <code v-pre>{{ item.name }}</code>。</li>
                     <li><strong>段落循环</strong>：在段落前后加入 <code>{% p for item in features %}</code> 和 <code>{% p endfor %}</code>。</li>
+                    <li><strong>多级嵌套循环与自动编号</strong>：如果你需要 1.1, 1.1.1 这样的多级章节，可以在模板中使用嵌套循环。Word 的原生多级列表会自动计算序号！例如：
+                      <pre class="bg-gray-100 p-2 mt-1 rounded text-xs"><code>{% p for module in modules %}
+【套用Heading 2样式】 <span v-pre>{{ module.name }}</span>
+  {% p for feature in module.features %}
+  【套用Heading 3样式】 <span v-pre>{{ feature.name }}</span>
+  <span v-pre>{{ feature.desc }}</span>
+  {% p endfor %}
+{% p endfor %}</code></pre>
+                    </li>
                   </ul>
                   <p>AI 会自动识别这些结构，输出一个包含多条数据的 JSON 数组，解析器将自动把表格或段落循环渲染 10 次，完美保留所有原格式！</p>
                 </div>
