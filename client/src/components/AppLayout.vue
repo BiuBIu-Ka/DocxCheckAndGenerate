@@ -8,7 +8,7 @@ import {
   FolderOpenOutlined,
   HomeOutlined,
   SettingOutlined,
-  AppstoreOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -16,11 +16,10 @@ const router = useRouter()
 
 const items = [
   { key: '/', icon: () => h(HomeOutlined), label: '工作台' },
-  { key: '/generate', icon: () => h(BookOutlined), label: '文档编制' },
-  { key: '/review', icon: () => h(FileSearchOutlined), label: '智能审查' },
-  { key: '/knowledge', icon: () => h(FolderOpenOutlined), label: 'GJB知识库' },
-  { key: '/manual', icon: () => h(AppstoreOutlined), label: '手册生成' },
-  { key: '/models', icon: () => h(SettingOutlined), label: '系统设置' },
+  { key: '/documents', icon: () => h(BookOutlined), label: '文档管理' },
+  { key: '/knowledge', icon: () => h(FolderOpenOutlined), label: '知识库管理' },
+  { key: '/models', icon: () => h(SettingOutlined), label: '模型设置' },
+  { key: '/help', icon: () => h(QuestionCircleOutlined), label: '帮助中心' },
 ]
 
 const selectedKeys = computed(() => [route.path])
