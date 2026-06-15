@@ -17,8 +17,16 @@
           <div class="tip">请选择包含变量标记（如 {name}, {#items} ... {/items}）的 DOCX 文件</div>
         </el-form-item>
 
-        <el-form-item label="变量提取结果" v-if="templateVariables.length > 0">
-          <el-tag v-for="tag in templateVariables" :key="tag" class="mr-2 mb-2">{{ tag }}</el-tag>
+        <el-form-item label="变量含义与示例配置" v-if="templateVariables.length > 0">
+          <div class="tip mb-2">您可以为每个变量指定含义或示例，AI 在生成时会严格参考这些说明。</div>
+          <el-table :data="templateVariables" border size="small" style="width: 100%">
+            <el-table-column prop="name" label="变量名" width="200" />
+            <el-table-column label="含义说明与示例 (AI 将参考此内容)">
+              <template #default="scope">
+                <el-input v-model="scope.row.description" placeholder="例如：描述操作步骤。示例：1.用户点击登录..." />
+              </template>
+            </el-table-column>
+          </el-table>
         </el-form-item>
 
         <el-form-item label="生成标准/规则">
@@ -48,7 +56,7 @@ import { getSettings, saveSettings, selectTemplateFile, saveTemplateBuffer } fro
 const templatePath = ref('')
 const templateName = ref('')
 const standardText = ref('')
-const templateVariables = ref<string[]>([])
+const templateVariables = ref<{name: string, description: string}[]>([])
 const saving = ref(false)
 
 onMounted(async () => {
@@ -58,7 +66,13 @@ onMounted(async () => {
       templatePath.value = settings.templatePath || ''
       templateName.value = settings.templateName || templatePath.value || ''
       standardText.value = settings.standardText || ''
-      templateVariables.value = settings.templateVariables || []
+      
+      // 兼容旧的 string[] 数据结构，转换为新的对象数组
+      if (settings.templateVariables) {
+        templateVariables.value = settings.templateVariables.map((v: any) => {
+          return typeof v === 'string' ? { name: v, description: '' } : v
+        })
+      }
     }
   } catch (error) {
     console.error('Failed to load settings', error)
@@ -101,8 +115,14 @@ const extractVariables = async (buffer: ArrayBuffer) => {
     while ((match = regex.exec(text)) !== null) {
       matches.add(match[1])
     }
-    templateVariables.value = Array.from(matches)
     
+    // 保留已有的描述信息
+    const newVars = Array.from(matches)
+    templateVariables.value = newVars.map(name => {
+      const existing = templateVariables.value.find(v => v.name === name)
+      return { name, description: existing ? existing.description : '' }
+    })
+
     if (templateVariables.value.length === 0) {
       ElMessage.warning('未在模板中解析到合法变量，请确认变量被单大括号 {} 包裹。')
     } else {

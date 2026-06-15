@@ -10,11 +10,19 @@
             </div>
           </template>
           <el-form label-position="top">
+            <el-form-item label="全局系统背景 (提升内容相关度)">
+              <el-input
+                v-model="globalContext"
+                type="textarea"
+                :rows="3"
+                placeholder="请输入当前文档所属系统的全局介绍、项目背景、总体目标等。这能帮助 AI 将局部功能点与全局业务结合起来。"
+              />
+            </el-form-item>
             <el-form-item label="参考资料">
               <el-input
                 v-model="referenceMaterials"
                 type="textarea"
-                :rows="12"
+                :rows="10"
                 placeholder="请输入用于生成文档的参考资料（可包含多个功能点、描述、背景等）"
               />
             </el-form-item>
@@ -82,6 +90,7 @@ import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
 import { getSettings, getTemplateBuffer, saveGeneratedDocument } from '../utils/bridge'
 
+const globalContext = ref('')
 const referenceMaterials = ref('')
 const notes = ref('')
 const generating = ref(false)
@@ -89,7 +98,7 @@ const currentStep = ref(0)
 
 const hasApiConfig = ref(false)
 const hasTemplate = ref(false)
-const templateVariables = ref<string[]>([])
+const templateVariables = ref<{name: string, description: string}[]>([])
 let appSettings: any = null
 
 onMounted(async () => {
@@ -102,7 +111,7 @@ const loadSettings = async () => {
     if (appSettings) {
       hasApiConfig.value = !!(appSettings.apiUrl && appSettings.apiKey && appSettings.modelName)
       hasTemplate.value = !!appSettings.templatePath
-      templateVariables.value = appSettings.templateVariables || []
+      templateVariables.value = (appSettings.templateVariables || []).map((v: any) => typeof v === 'string' ? { name: v, description: '' } : v)
     }
   } catch (error) {
     console.error('Failed to load settings', error)
@@ -127,28 +136,37 @@ const generateDoc = async () => {
   try {
     // Step 1: Prepare data
     currentStep.value = 1
-    
+
     // Build JSON Schema hint based on docxtemplater tags
-    const loops = templateVariables.value.filter(t => t.startsWith('#')).map(t => t.substring(1))
-    const simpleVars = templateVariables.value.filter(t => !t.startsWith('#') && !t.startsWith('/'))
-    
+    const loops = templateVariables.value.filter(t => t.name.startsWith('#')).map(t => t.name.substring(1))
+    const simpleVars = templateVariables.value.filter(t => !t.name.startsWith('#') && !t.name.startsWith('/'))
+
     let schemaHint = "请严格按照以下 JSON 格式输出数据：\n{\n"
     simpleVars.forEach(v => {
-      schemaHint += `  "${v}": "对应内容",\n`
+      schemaHint += `  "${v.name}": "【请参考下方的说明进行填写】",\n`
     })
     loops.forEach(l => {
-      schemaHint += `  "${l}": [\n    {\n      // 数组项的字段由参考资料决定，请推断出需要的字段并填充\n    }\n  ],\n`
+      schemaHint += `  "${l}": [\n    {\n      // 数组项的字段请根据参考资料和变量含义推断并填充\n    }\n  ],\n`
     })
     schemaHint += "}"
 
+    const varDefinitions = templateVariables.value
+      .map(v => `- 【${v.name}】: ${v.description || '无具体说明，请根据上下文推断'}`)
+      .join('\n')
+
     const prompt = `
-你是一个专业的文档生成助手。你需要根据【参考资料】、【整体规则】和【本次注意事项】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
+你是一个专业的文档生成助手。你需要根据【全局系统背景】、【参考资料】、【整体规则】和【本次注意事项】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
 请不要输出任何 markdown 标记（如 \`\`\`json ），仅输出合法的 JSON 字符串本身！
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
-包含的变量名有：${templateVariables.value.join(', ')}。
 如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。
 ${schemaHint}
+
+【变量含义与示例说明（非常重要，请严格遵守）】：
+${varDefinitions}
+
+【全局系统背景】：
+${globalContext.value || '无'}
 
 【整体规则】：
 ${appSettings.standardText || '无'}
