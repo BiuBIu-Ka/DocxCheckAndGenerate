@@ -8,18 +8,20 @@ import path from 'path'
 export default defineConfig({
   plugins: [
     vue(),
-    electron([
-      {
-        entry: 'electron/main.ts',
-      },
-      {
-        entry: 'electron/preload.ts',
-        onstart(options) {
-          options.reload()
+    ...(process.env.WEB_ONLY ? [] : [
+      electron([
+        {
+          entry: 'electron/main.ts',
         },
-      },
+        {
+          entry: 'electron/preload.ts',
+          onstart(options) {
+            options.reload()
+          },
+        },
+      ]),
+      renderer(),
     ]),
-    renderer(),
   ],
   resolve: {
     alias: {
