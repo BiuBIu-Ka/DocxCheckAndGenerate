@@ -216,8 +216,34 @@ function compactMessages(messages: any[]) {
   })
 }
 
-const MAX_ARRAY_ITEMS = 5000
+const MAX_ARRAY_ITEMS = 300
 const ARRAY_PUSH_CHUNK_SIZE = 200
+const MAX_STRING_LENGTH = 8000
+const MAX_TOTAL_STRING_CHARS = 120000
+const MAX_RENDER_NODES = 2000
+
+function stableStringify(value: any): string {
+  if (value === null || value === undefined) return String(value)
+  if (typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const keys = Object.keys(value).sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+}
+
+function getArrayItemKey(item: any, index: number) {
+  if (item === null || item === undefined) return `null:${index}`
+  if (typeof item === 'string') return `str:${item.slice(0, 200)}`
+  if (typeof item !== 'object') return `primitive:${String(item)}`
+
+  const preferredKeys = ['id', 'key', 'name', 'title', 'code', '编号', '标识', '名称']
+  for (const key of preferredKeys) {
+    const value = item[key]
+    if (typeof value === 'string' && value.trim()) {
+      return `${key}:${value.trim()}`
+    }
+  }
+  return `obj:${stableStringify(item).slice(0, 500)}`
+}
 
 function safeAppendArray(target: any[], source: any[], path = 'root') {
   if (!Array.isArray(target) || !Array.isArray(source)) return target
@@ -232,12 +258,86 @@ function safeAppendArray(target: any[], source: any[], path = 'root') {
     return target
   }
 
-  const toAppend = source.slice(0, remaining)
+  const existingKeys = new Set(target.map((item, index) => getArrayItemKey(item, index)))
+  const dedupedSource = source.filter((item, index) => {
+    const key = getArrayItemKey(item, index)
+    if (existingKeys.has(key)) return false
+    existingKeys.add(key)
+    return true
+  })
+
+  const toAppend = dedupedSource.slice(0, remaining)
   for (let i = 0; i < toAppend.length; i += ARRAY_PUSH_CHUNK_SIZE) {
     const chunk = toAppend.slice(i, i + ARRAY_PUSH_CHUNK_SIZE)
     target.push(...chunk)
   }
   return target
+}
+
+function sanitizeForDocx(value: any, path = 'root'): any {
+  if (value === null || value === undefined) return ''
+
+  if (typeof value === 'string') {
+    const normalized = value.replace(/\n{4,}/g, '\n\n\n').trim()
+    if (normalized.length <= MAX_STRING_LENGTH) return normalized
+    return `${normalized.slice(0, MAX_STRING_LENGTH)}\n...[内容过长已截断]`
+  }
+
+  if (typeof value !== 'object') return value
+
+  if (Array.isArray(value)) {
+    const sanitizedItems: any[] = []
+    const seen = new Set<string>()
+    for (let i = 0; i < value.length && sanitizedItems.length < MAX_ARRAY_ITEMS; i++) {
+      const item = sanitizeForDocx(value[i], `${path}[${i}]`)
+      const key = getArrayItemKey(item, i)
+      if (seen.has(key)) continue
+      seen.add(key)
+      sanitizedItems.push(item)
+    }
+    return sanitizedItems
+  }
+
+  const result: Record<string, any> = {}
+  for (const [key, child] of Object.entries(value)) {
+    const sanitizedChild = sanitizeForDocx(child, `${path}.${key}`)
+    const isEmptyObject = sanitizedChild && typeof sanitizedChild === 'object' && !Array.isArray(sanitizedChild) && Object.keys(sanitizedChild).length === 0
+    const isEmptyArray = Array.isArray(sanitizedChild) && sanitizedChild.length === 0
+    if (sanitizedChild === '' || sanitizedChild === null || sanitizedChild === undefined || isEmptyObject || isEmptyArray) {
+      continue
+    }
+    result[key] = sanitizedChild
+  }
+  return result
+}
+
+function inspectRenderData(value: any) {
+  const stats = {
+    totalStringChars: 0,
+    maxStringLength: 0,
+    totalArrayItems: 0,
+    totalNodes: 0,
+  }
+
+  const walk = (node: any) => {
+    stats.totalNodes += 1
+    if (node === null || node === undefined) return
+    if (typeof node === 'string') {
+      stats.totalStringChars += node.length
+      stats.maxStringLength = Math.max(stats.maxStringLength, node.length)
+      return
+    }
+    if (typeof node !== 'object') return
+    if (Array.isArray(node)) {
+      stats.totalArrayItems += node.length
+      node.forEach(walk)
+      return
+    }
+    Object.values(node).forEach(walk)
+  }
+
+  walk(value)
+  return stats
 }
 
 // 深合并函数：将 partialData 合并进 rawDocumentData 中。如果遇到数组，则将新项追加到原数组中。
@@ -328,7 +428,8 @@ const generateDoc = async () => {
 3. 调用 \`submit_partial_data\` 工具时，只提交“新增数据增量”，绝对不要重复提交之前已经提交过的数据。
 4. 如果字段是数组，新提交的数据会自动追加到末尾，所以不要把历史完整数组反复重发。
 5. 单次提交不要过大，请控制在一个模块或一批功能点，不要一次提交整份文档。
-6. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
+6. 每个文本字段请尽量精炼，通常不要超过 2000 字，严禁把原始资料整段照搬进单个字段。
+7. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
 如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。每次提交局部数据时，请保持这个结构，只填充当前搜集到的部分。
@@ -525,11 +626,18 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       linebreaks: true,
     })
 
-    // 最后的安全体检：防止数据体量异常爆表
-    const finalData = rawDocumentData
-    const totalItems = Object.values(finalData).reduce((acc: number, val: any) => acc + (Array.isArray(val) ? val.length : 0), 0)
-    if (totalItems > 10000) {
-      throw new Error(`数据规模过大 (${totalItems}项)，为防止卡死已拦截渲染。请尝试缩小生成范围。`)
+    const finalData = sanitizeForDocx(rawDocumentData)
+    const renderStats = inspectRenderData(finalData)
+    documentSummary.value = `${summarizeDocumentData(finalData)}\n总文本字符: ${renderStats.totalStringChars}\n数组项总数: ${renderStats.totalArrayItems}\n最大字段长度: ${renderStats.maxStringLength}`
+
+    if (renderStats.totalArrayItems > MAX_RENDER_NODES) {
+      throw new Error(`数组项总数过大 (${renderStats.totalArrayItems})，已拦截渲染，请缩小生成范围。`)
+    }
+    if (renderStats.totalStringChars > MAX_TOTAL_STRING_CHARS) {
+      throw new Error(`文本总量过大 (${renderStats.totalStringChars} 字)，已拦截渲染，请缩小范围或减少单字段长度。`)
+    }
+    if (renderStats.maxStringLength > MAX_STRING_LENGTH) {
+      throw new Error(`存在超长字段 (${renderStats.maxStringLength} 字)，已拦截渲染。`)
     }
 
     doc.render(finalData)
