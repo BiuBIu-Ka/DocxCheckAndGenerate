@@ -44,7 +44,23 @@
                 <el-icon class="mr-1"><Document /></el-icon> 开始生成文档
               </el-button>
             </el-form-item>
+            <el-form-item v-if="previewJson">
+              <el-button type="success" size="large" @click="exportDocx" style="width: 100%;">
+                <el-icon class="mr-1"><Document /></el-icon> 确认无误后导出 DOCX
+              </el-button>
+            </el-form-item>
           </el-form>
+        </el-card>
+
+        <el-card class="box-card" v-if="previewJson" style="margin-top: 20px;">
+          <template #header>
+            <div class="card-header">
+              <span>合成前结果预览</span>
+              <el-button size="small" @click="copyPreviewJson">复制结果</el-button>
+            </div>
+          </template>
+          <div class="tip" style="margin-bottom: 8px;">这里展示的是最终送入 DOCX 渲染前的结构化结果，您可以先检查后再导出。</div>
+          <pre style="background: #f5f7fa; padding: 12px; font-size: 12px; border-radius: 4px; max-height: 480px; overflow: auto; margin: 0; white-space: pre-wrap;">{{ previewJson }}</pre>
         </el-card>
       </el-col>
       <el-col :span="8">
@@ -114,6 +130,8 @@ const currentStep = ref(0)
 const documentSummary = ref('尚未开始')
 const generationLogs = ref<string[]>([])
 const submitCount = ref(0)
+const previewJson = ref('')
+const finalPreviewData = ref<Record<string, any> | null>(null)
 
 const hasApiConfig = ref(false)
 const hasTemplate = ref(false)
@@ -740,16 +758,6 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     await nextTick()
     await yieldToUi() // 渲染前最后释放一次 UI，确保进度文字能显示出来
 
-    const buffer = await getTemplateBuffer(currentTemplatePath.value)
-    if (!buffer) {
-      throw new Error('无法读取模板文件内容，请重新上传模板')
-    }
-    const zip = new PizZip(buffer)
-    const doc = new Docxtemplater(zip, {
-      paragraphLoop: true,
-      linebreaks: true,
-    })
-
     const finalData = sanitizeForDocx(rawDocumentData)
     const renderStats = inspectRenderData(finalData)
     documentSummary.value = `${summarizeDocumentData(finalData)}\n总文本字符: ${renderStats.totalStringChars}\n数组项总数: ${renderStats.totalArrayItems}\n最大字段长度: ${renderStats.maxStringLength}`
@@ -764,29 +772,71 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       throw new Error(`存在超长字段 (${renderStats.maxStringLength} 字)，已拦截渲染。`)
     }
 
-    doc.render(finalData)
-
-    const outZip = doc.getZip().generate({
-      type: 'uint8array',
-      compression: 'DEFLATE',
-    })
-
-    // Step 4: Save Document
-    currentStep.value = 4
-    const success = await saveGeneratedDocument(outZip, 'generated_document.docx')
-
-    if (success) {
-      ElMessage.success('文档生成并保存成功！')
-    } else {
-      ElMessage.info('取消保存或保存失败')
-    }
+    finalPreviewData.value = finalData
+    previewJson.value = JSON.stringify(finalData, null, 2)
+    currentStep.value = 0
+    ElMessage.success('结构化结果已生成，请先检查预览，再点击“确认无误后导出 DOCX”。')
 
   } catch (error: any) {
     console.error(error)
     ElMessage.error('生成出错: ' + error.message)
   } finally {
     generating.value = false
+  }
+}
+
+const exportDocx = async () => {
+  if (!finalPreviewData.value) {
+    return ElMessage.warning('请先生成结构化结果')
+  }
+
+  try {
+    generating.value = true
+    currentStep.value = 3
+    await nextTick()
+    await yieldToUi()
+
+    const buffer = await getTemplateBuffer(currentTemplatePath.value)
+    if (!buffer) {
+      throw new Error('无法读取模板文件内容，请重新上传模板')
+    }
+
+    const zip = new PizZip(buffer)
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+    })
+
+    doc.render(finalPreviewData.value)
+
+    const outZip = doc.getZip().generate({
+      type: 'uint8array',
+      compression: 'DEFLATE',
+    })
+
+    currentStep.value = 4
+    const success = await saveGeneratedDocument(outZip, 'generated_document.docx')
+    if (success) {
+      ElMessage.success('文档导出成功！')
+    } else {
+      ElMessage.info('取消保存或保存失败')
+    }
+  } catch (error: any) {
+    console.error(error)
+    ElMessage.error('导出出错: ' + error.message)
+  } finally {
+    generating.value = false
     currentStep.value = 0
+  }
+}
+
+const copyPreviewJson = async () => {
+  if (!previewJson.value) return
+  try {
+    await navigator.clipboard.writeText(previewJson.value)
+    ElMessage.success('预览结果已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动复制')
   }
 }
 </script>
