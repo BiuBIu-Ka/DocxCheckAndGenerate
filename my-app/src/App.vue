@@ -11,6 +11,10 @@
           <el-icon><Document /></el-icon>
           <span>文档生成</span>
         </el-menu-item>
+        <el-menu-item index="/knowledge">
+          <el-icon><Collection /></el-icon>
+          <span>知识库管理</span>
+        </el-menu-item>
         <el-menu-item index="/templates">
           <el-icon><Files /></el-icon>
           <span>模板与规则</span>

@@ -1,4 +1,6 @@
 import localforage from 'localforage'
+import PizZip from 'pizzip'
+import Docxtemplater from 'docxtemplater'
 
 // 判断当前是否处于 Electron 环境
 const isElectron = typeof window !== 'undefined' && !!window.ipcRenderer
@@ -68,6 +70,64 @@ export async function getTemplateBuffer(path: string): Promise<ArrayBuffer | nul
     return await window.ipcRenderer.invoke('read-file', path)
   } else {
     return await localforage.getItem('web_template_buffer')
+  }
+}
+
+export async function selectAndExtractTextFiles(): Promise<{name: string, content: string}[]> {
+  if (isElectron) {
+    const result = await window.ipcRenderer.invoke('select-file', {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Documents', extensions: ['txt', 'md', 'docx'] }]
+    })
+    if (!result.canceled && result.filePaths.length > 0) {
+      const files = []
+      for (const path of result.filePaths) {
+        const buffer = await window.ipcRenderer.invoke('read-file', path)
+        const name = path.split('\\').pop()?.split('/').pop() || 'unknown'
+        let content = ''
+        if (name.endsWith('.docx')) {
+          try {
+            const zip = new PizZip(buffer)
+            const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true })
+            content = doc.getFullText()
+          } catch(e) { console.error(e) }
+        } else {
+          content = new TextDecoder('utf-8').decode(buffer)
+        }
+        files.push({ name, content })
+      }
+      return files
+    }
+    return []
+  } else {
+    return new Promise((resolve) => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.accept = '.txt,.md,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      input.onchange = async (e: any) => {
+        const files = e.target.files
+        if (!files || files.length === 0) return resolve([])
+        const result = []
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i]
+          const buffer = await file.arrayBuffer()
+          let content = ''
+          if (file.name.endsWith('.docx')) {
+            try {
+              const zip = new PizZip(buffer)
+              const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true })
+              content = doc.getFullText()
+            } catch(e) { console.error(e) }
+          } else {
+            content = new TextDecoder('utf-8').decode(buffer)
+          }
+          result.push({ name: file.name, content })
+        }
+        resolve(result)
+      }
+      input.click()
+    })
   }
 }
 

@@ -10,6 +10,11 @@
             </div>
           </template>
           <el-form label-position="top">
+            <el-form-item label="引用知识库 (可选)">
+              <el-select v-model="selectedKbId" placeholder="请选择要作为核心参考资料的知识库" clearable style="width: 100%;">
+                <el-option v-for="kb in knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id" />
+              </el-select>
+            </el-form-item>
             <el-form-item label="全局系统背景 (提升内容相关度)">
               <el-input
                 v-model="globalContext"
@@ -18,14 +23,14 @@
                 placeholder="请输入当前文档所属系统的全局介绍、项目背景、总体目标等。这能帮助 AI 将局部功能点与全局业务结合起来。"
               />
             </el-form-item>
-            <el-form-item label="参考资料">
-              <el-input
-                v-model="referenceMaterials"
-                type="textarea"
-                :rows="10"
-                placeholder="请输入用于生成文档的参考资料（可包含多个功能点、描述、背景等）"
-              />
-            </el-form-item>
+            <el-form-item label="补充参考资料 (手动输入)">
+                <el-input
+                  v-model="referenceMaterials"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="请输入用于生成文档的补充参考资料。如果已选择知识库，此内容将与知识库合并发送给 AI。"
+                />
+              </el-form-item>
             <el-form-item label="注意事项">
               <el-input
                 v-model="notes"
@@ -99,6 +104,8 @@ const currentStep = ref(0)
 const hasApiConfig = ref(false)
 const hasTemplate = ref(false)
 const templateVariables = ref<{name: string, description: string}[]>([])
+const knowledgeBases = ref<any[]>([])
+const selectedKbId = ref('')
 let appSettings: any = null
 
 onMounted(async () => {
@@ -112,6 +119,7 @@ const loadSettings = async () => {
       hasApiConfig.value = !!(appSettings.apiUrl && appSettings.apiKey && appSettings.modelName)
       hasTemplate.value = !!appSettings.templatePath
       templateVariables.value = (appSettings.templateVariables || []).map((v: any) => typeof v === 'string' ? { name: v, description: '' } : v)
+      knowledgeBases.value = appSettings.knowledgeBases || []
     }
   } catch (error) {
     console.error('Failed to load settings', error)
@@ -126,8 +134,8 @@ const generateDoc = async () => {
   if (!hasTemplate.value) {
     return ElMessage.warning('请先在"模板与规则"页面配置 DOCX 模板')
   }
-  if (!referenceMaterials.value.trim()) {
-    return ElMessage.warning('请输入参考资料')
+  if (!selectedKbId.value && !referenceMaterials.value.trim()) {
+    return ElMessage.warning('请选择知识库或手动输入补充参考资料')
   }
 
   generating.value = true
@@ -154,6 +162,9 @@ const generateDoc = async () => {
       .map(v => `- 【${v.name}】: ${v.description || '无具体说明，请根据上下文推断'}`)
       .join('\n')
 
+    const selectedKb = knowledgeBases.value.find(k => k.id === selectedKbId.value)
+    const kbContent = selectedKb ? `【引用的核心知识库文档内容】：\n${selectedKb.content}\n\n` : ''
+
     const prompt = `
 你是一个专业的文档生成助手。你需要根据【全局系统背景】、【参考资料】、【整体规则】和【本次注意事项】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
 请不要输出任何 markdown 标记（如 \`\`\`json ），仅输出合法的 JSON 字符串本身！
@@ -175,7 +186,9 @@ ${appSettings.standardText || '无'}
 ${notes.value || '无'}
 
 【参考资料】：
-${referenceMaterials.value}
+${kbContent}
+【补充参考资料（用户手动输入）】：
+${referenceMaterials.value || '无'}
 `
 
     // Step 2: Request AI
