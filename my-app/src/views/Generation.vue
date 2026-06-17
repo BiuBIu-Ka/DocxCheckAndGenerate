@@ -162,6 +162,27 @@ async function copyPreviewJson() {
   }
 }
 
+async function persistRunSafely(input: {
+  status: 'success' | 'error'
+  templateName?: string
+  knowledgeBaseIds: string[]
+  knowledgeBaseNames: string[]
+}) {
+  try {
+    await workbench.persistCurrentRun(input)
+  } catch (error: any) {
+    console.error('Failed to persist run history', error)
+    workbench.appendEvent({
+      type: 'warning',
+      title: '运行记录保存失败',
+      summary: error.message || '无法将本次任务写入本地记录',
+      status: 'warning',
+      payload: { message: error.message },
+    })
+    ElMessage.warning(`运行记录保存失败：${error.message}`)
+  }
+}
+
 async function resolveTemplateBuffer() {
   if (!selectedTemplate.value) return null
   if (currentTemplateBuffer.value) return currentTemplateBuffer.value
@@ -258,7 +279,7 @@ async function generateDoc() {
       summary,
     })
     workbench.finishRun('success')
-    await workbench.persistCurrentRun({
+    await persistRunSafely({
       status: 'success',
       templateName: selectedTemplate.value.name,
       knowledgeBaseIds: selectedKnowledgeBaseIds.value,
@@ -276,7 +297,7 @@ async function generateDoc() {
       payload: { message: error.message },
     })
     workbench.finishRun('error')
-    await workbench.persistCurrentRun({
+    await persistRunSafely({
       status: 'error',
       templateName: selectedTemplate.value?.name,
       knowledgeBaseIds: selectedKnowledgeBaseIds.value,
