@@ -83,8 +83,10 @@
           </el-steps>
           
           <div v-if="currentStep === 2" style="margin-top: 20px;">
-            <div style="font-size: 13px; color: #666; margin-bottom: 8px;">已收集的局部数据预览 (实时合并)：</div>
-            <pre style="background: #f5f7fa; padding: 10px; font-size: 12px; border-radius: 4px; max-height: 300px; overflow: auto; margin: 0;">{{ JSON.stringify(documentData, null, 2) }}</pre>
+            <div style="font-size: 13px; color: #666; margin-bottom: 8px;">增量生成状态：</div>
+            <div style="background: #f5f7fa; padding: 10px; font-size: 12px; border-radius: 4px; margin-bottom: 8px; white-space: pre-wrap;">{{ documentSummary }}</div>
+            <div style="font-size: 12px; color: #909399; margin-bottom: 6px;">累计提交次数：{{ submitCount }}</div>
+            <pre style="background: #f5f7fa; padding: 10px; font-size: 12px; border-radius: 4px; max-height: 180px; overflow: auto; margin: 0;">{{ generationLogs.join('\n') }}</pre>
           </div>
         </el-card>
       </el-col>
@@ -93,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import OpenAI from 'openai'
@@ -109,7 +111,9 @@ const referenceMaterials = ref('')
 const notes = ref('')
 const generating = ref(false)
 const currentStep = ref(0)
-const documentData = ref<any>({})
+const documentSummary = ref('尚未开始')
+const generationLogs = ref<string[]>([])
+const submitCount = ref(0)
 
 const hasApiConfig = ref(false)
 const hasTemplate = ref(false)
@@ -120,6 +124,7 @@ const templateVariables = ref<{name: string, description: string}[]>([])
 const knowledgeBases = ref<any[]>([])
 const selectedKbIds = ref<string[]>([])
 let appSettings: any = null
+let rawDocumentData: Record<string, any> = {}
 
 onMounted(async () => {
   await loadSettings()
@@ -158,42 +163,87 @@ const loadSettings = async () => {
   }
 }
 
-// 深合并函数：将 partialData 合并进 documentData 中。如果遇到数组，则将新项追加到原数组中。
+function appendGenerationLog(message: string) {
+  generationLogs.value = [...generationLogs.value.slice(-11), message]
+}
+
+function summarizeDocumentData(data: Record<string, any>) {
+  const parts: string[] = []
+  const keys = Object.keys(data)
+  parts.push(`顶层字段数: ${keys.length}`)
+
+  for (const key of keys.slice(0, 12)) {
+    const value = data[key]
+    if (Array.isArray(value)) {
+      parts.push(`${key}: 数组(${value.length})`)
+    } else if (value && typeof value === 'object') {
+      parts.push(`${key}: 对象(${Object.keys(value).length})`)
+    } else if (typeof value === 'string') {
+      parts.push(`${key}: 文本(${value.length}字)`)
+    } else {
+      parts.push(`${key}: ${typeof value}`)
+    }
+  }
+
+  if (keys.length > 12) {
+    parts.push(`其余字段: ${keys.length - 12}`)
+  }
+
+  return parts.join('\n')
+}
+
+function trimMessageContent(content: string, maxLength = 4000) {
+  if (!content) return content
+  if (content.length <= maxLength) return content
+  return `${content.slice(0, maxLength)}\n...[truncated ${content.length - maxLength} chars]`
+}
+
+function compactMessages(messages: any[]) {
+  if (messages.length <= 24) return messages
+
+  const head = messages.slice(0, 6)
+  const tail = messages.slice(-18).map((msg) => {
+    if (typeof msg?.content === 'string') {
+      return { ...msg, content: trimMessageContent(msg.content) }
+    }
+    return msg
+  })
+
+  return [...head, ...tail]
+}
+
+// 深合并函数：将 partialData 合并进 rawDocumentData 中。如果遇到数组，则将新项追加到原数组中。
 function mergePartialData(target: any, source: any) {
-  // 如果 target 或 source 不是对象（或者为 null），直接返回 source 覆盖
-  if (typeof target !== 'object' || target === null) return source;
-  if (typeof source !== 'object' || source === null) return source;
+  if (typeof target !== 'object' || target === null) return source
+  if (typeof source !== 'object' || source === null) return source
 
-  // 如果两者都是数组，执行追加 (Concat)
   if (Array.isArray(target) && Array.isArray(source)) {
-    return target.concat(source);
+    target.push(...source)
+    return target
   }
 
-  // 如果一个是数组一个不是数组，直接用 source 覆盖 target
   if (Array.isArray(target) !== Array.isArray(source)) {
-    return source;
+    return source
   }
 
-  // 遍历 source 的键进行深合并
   for (const key in source) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
 
-    const sourceVal = source[key];
-    const targetVal = target[key];
+    const sourceVal = source[key]
+    const targetVal = target[key]
 
     if (Array.isArray(targetVal) && Array.isArray(sourceVal)) {
-      target[key] = targetVal.concat(sourceVal);
+      targetVal.push(...sourceVal)
     } else if (
       typeof targetVal === 'object' && targetVal !== null && !Array.isArray(targetVal) &&
       typeof sourceVal === 'object' && sourceVal !== null && !Array.isArray(sourceVal)
     ) {
-      target[key] = mergePartialData(targetVal, sourceVal);
+      target[key] = mergePartialData(targetVal, sourceVal)
     } else {
-      // 基础类型或其他情况，直接覆盖
-      target[key] = sourceVal;
+      target[key] = sourceVal
     }
   }
-  return target;
+  return target
 }
 
 const generateDoc = async () => {
@@ -210,7 +260,10 @@ const generateDoc = async () => {
 
   generating.value = true
   currentStep.value = 0
-  documentData.value = {}
+  rawDocumentData = {}
+  documentSummary.value = '正在准备生成...'
+  generationLogs.value = []
+  submitCount.value = 0
 
   try {
     // Step 1: Prepare data
@@ -243,9 +296,9 @@ const generateDoc = async () => {
 由于最终的文档可能非常巨大，你 **绝对不要** 在最后一次性输出完整的 JSON 数据！
 请采取“边搜索，边提交”的策略：
 1. 先搜索并整理某个模块的数据。
-2. 立即调用 \`submit_partial_data\` 工具，将该模块的 JSON 数据提交给我。系统会自动合并你提交的数据（如果是数组，会自动追加到末尾）。
-3. 然后继续搜索下一个模块，再次调用 \`submit_partial_data\` 提交。
-4. 重复这个过程，你可以调用几十次该工具！
+2. 每次提交时，尽量提交“一个完整模块”或“一批完整功能点”，不要拆得过碎。
+3. 调用 \`submit_partial_data\` 工具时，只提交“新增数据增量”，绝对不要重复提交之前已经提交过的数据。
+4. 如果字段是数组，新提交的数据会自动追加到末尾，所以不要把历史完整数组反复重发。
 5. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
@@ -293,7 +346,7 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       type: "function",
       function: {
         name: "submit_partial_data",
-        description: "提交局部生成的 JSON 数据。对于长文档，你必须分多次调用此工具提交数据。如果字段是数组，新提交的数据会自动追加到现有数组末尾。",
+        description: "提交局部生成的 JSON 数据。只提交新增增量，不要重复提交历史数据。如果字段是数组，新提交的数据会自动追加到现有数组末尾。",
         parameters: {
           type: "object",
           properties: {
@@ -345,12 +398,12 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     let messages: any[] = [{ role: "user", content: prompt }]
     let loopCount = 0
     let isFinished = false
+    const seenPartialPayloads = new Set<string>()
 
-    // We increase the max loop count to allow for chunked generation of huge documents
-    while (loopCount < 100 && !isFinished) {
+    while (loopCount < 40 && !isFinished) {
       loopCount++
       const reqPayload: any = {
-        messages,
+        messages: compactMessages(messages),
         model: appSettings.modelName,
         temperature: 0.7,
       }
@@ -369,13 +422,18 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
           if (toolCall.function.name === 'submit_partial_data') {
             try {
               const args = JSON.parse(toolCall.function.arguments)
-              const partialData = JSON.parse(args.data)
-              
-              // To ensure reactivity in Vue, we need to re-assign the cloned merged object
-              const merged = mergePartialData(JSON.parse(JSON.stringify(documentData.value)), partialData)
-              documentData.value = merged
-              
-              toolResult = `局部数据提交成功。当前进度: ${args.progress || '无'}。请继续搜索并提交下一部分，如果全部完成请调用 finish_generation。`
+              const payload = String(args.data || '')
+              if (seenPartialPayloads.has(payload)) {
+                toolResult = '检测到重复提交的局部数据，已忽略。请只提交新增增量，不要重复提交历史内容。'
+              } else {
+                seenPartialPayloads.add(payload)
+                const partialData = JSON.parse(payload)
+                mergePartialData(rawDocumentData, partialData)
+                submitCount.value += 1
+                documentSummary.value = summarizeDocumentData(rawDocumentData)
+                appendGenerationLog(args.progress || `已完成第 ${submitCount.value} 次局部提交`)
+                toolResult = `局部数据提交成功。当前累计提交 ${submitCount.value} 次。请继续提交剩余增量；全部完成后调用 finish_generation。`
+              }
             } catch (e: any) {
               toolResult = "JSON 解析或合并失败: " + e.message + "。请确保你提交的 data 字段是一个合法的 JSON 字符串！"
             }
@@ -398,7 +456,7 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
               if (mcpItem) {
                  try {
                      const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
-                     toolResult = JSON.stringify(res)
+                     toolResult = trimMessageContent(JSON.stringify(res))
                  } catch(e: any) { toolResult = "MCP Tool Error: " + e.message }
               } else {
                  toolResult = "Tool not found"
@@ -414,7 +472,7 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
           })
         }
       } else {
-        // If AI stops calling tools but hasn't explicitly called finish_generation, we assume it's done.
+        appendGenerationLog('模型停止继续调用工具，准备进入文档渲染。')
         isFinished = true
         break
       }
@@ -422,6 +480,9 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     
     // Step 3: Render Document
     currentStep.value = 3
+    documentSummary.value = summarizeDocumentData(rawDocumentData)
+    await nextTick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     const buffer = await getTemplateBuffer(currentTemplatePath.value)
     if (!buffer) {
       throw new Error('无法读取模板文件内容，请重新上传模板')
@@ -432,7 +493,7 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       linebreaks: true,
     })
 
-    doc.render(documentData.value)
+    doc.render(rawDocumentData)
 
     const outZip = doc.getZip().generate({
       type: 'uint8array',
