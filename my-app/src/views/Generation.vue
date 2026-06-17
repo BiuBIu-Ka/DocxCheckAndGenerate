@@ -10,8 +10,8 @@
             </div>
           </template>
           <el-form label-position="top">
-            <el-form-item label="引用知识库 (可选)">
-              <el-select v-model="selectedKbId" placeholder="请选择要作为核心参考资料的知识库" clearable style="width: 100%;">
+            <el-form-item label="引用知识库 (可选，可多选)">
+              <el-select v-model="selectedKbIds" multiple placeholder="请选择要作为核心参考资料的知识库" clearable style="width: 100%;">
                 <el-option v-for="kb in knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id" />
               </el-select>
             </el-form-item>
@@ -59,12 +59,12 @@
             <el-tag :type="hasApiConfig ? 'success' : 'danger'">{{ hasApiConfig ? '已配置' : '未配置' }}</el-tag>
           </div>
           <div class="status-item">
-            <span class="label">模板文件：</span>
-            <el-tag :type="hasTemplate ? 'success' : 'danger'">{{ hasTemplate ? '已选择' : '未选择' }}</el-tag>
+            <span class="label">当前模板：</span>
+            <el-tag :type="hasTemplate ? 'success' : 'danger'">{{ hasTemplate ? currentTemplateName : '未选择' }}</el-tag>
           </div>
           <div class="status-item">
             <span class="label">模板变量：</span>
-            <span class="value" v-if="templateVariables.length > 0">{{ templateVariables.join(', ') }}</span>
+            <span class="value" v-if="templateVariables.length > 0">{{ templateVariables.map(v => v.name).join(', ') }}</span>
             <span class="value text-gray" v-else>无</span>
           </div>
         </el-card>
@@ -89,12 +89,15 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import OpenAI from 'openai'
 import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
 import { getSettings, getTemplateBuffer, saveGeneratedDocument, connectMcpServer, getMcpTools, callMcpTool } from '../utils/bridge'
 import { InternalToolManager } from '../utils/internalTools'
+
+const route = useRoute()
 
 const globalContext = ref('')
 const referenceMaterials = ref('')
@@ -104,9 +107,12 @@ const currentStep = ref(0)
 
 const hasApiConfig = ref(false)
 const hasTemplate = ref(false)
+const currentTemplateName = ref('')
+const currentTemplatePath = ref('')
+const currentStandardText = ref('')
 const templateVariables = ref<{name: string, description: string}[]>([])
 const knowledgeBases = ref<any[]>([])
-const selectedKbId = ref('')
+const selectedKbIds = ref<string[]>([])
 let appSettings: any = null
 
 onMounted(async () => {
@@ -118,9 +124,28 @@ const loadSettings = async () => {
     appSettings = await getSettings()
     if (appSettings) {
       hasApiConfig.value = !!(appSettings.apiUrl && appSettings.apiKey && appSettings.modelName)
-      hasTemplate.value = !!appSettings.templatePath
-      templateVariables.value = (appSettings.templateVariables || []).map((v: any) => typeof v === 'string' ? { name: v, description: '' } : v)
       knowledgeBases.value = appSettings.knowledgeBases || []
+      
+      const templateId = route.query.templateId as string
+      if (templateId && appSettings.templates) {
+        const tpl = appSettings.templates.find((t: any) => t.id === templateId)
+        if (tpl) {
+          hasTemplate.value = true
+          currentTemplateName.value = tpl.name
+          currentTemplatePath.value = tpl.path
+          currentStandardText.value = tpl.standardText || ''
+          templateVariables.value = tpl.variables || []
+        }
+      } else {
+        // Fallback for old data or no template passed
+        if (appSettings.templatePath) {
+           hasTemplate.value = true
+           currentTemplatePath.value = appSettings.templatePath
+           currentTemplateName.value = appSettings.templateName || '默认模板'
+           currentStandardText.value = appSettings.standardText || ''
+           templateVariables.value = (appSettings.templateVariables || []).map((v: any) => typeof v === 'string' ? { name: v, description: '' } : v)
+        }
+      }
     }
   } catch (error) {
     console.error('Failed to load settings', error)
@@ -135,7 +160,7 @@ const generateDoc = async () => {
   if (!hasTemplate.value) {
     return ElMessage.warning('请先在"模板与规则"页面配置 DOCX 模板')
   }
-  if (!selectedKbId.value && !referenceMaterials.value.trim()) {
+  if (selectedKbIds.value.length === 0 && !referenceMaterials.value.trim()) {
     return ElMessage.warning('请选择知识库或手动输入补充参考资料')
   }
 
@@ -163,20 +188,20 @@ const generateDoc = async () => {
       .map(v => `- 【${v.name}】: ${v.description || '无具体说明，请根据上下文推断'}`)
       .join('\n')
 
-    const selectedKb = knowledgeBases.value.find(k => k.id === selectedKbId.value)
-    const kbContent = selectedKb ? selectedKb.content : ''
+    const selectedKbs = knowledgeBases.value.filter(k => selectedKbIds.value.includes(k.id))
+    const kbContent = selectedKbs.map(k => `【知识库：${k.name}】\n${k.content}`).join('\n\n')
 
     const prompt = `
 你是一个专业的文档生成助手。你需要根据【全局系统背景】、【补充参考资料】和【整体规则】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
 请不要输出任何 markdown 标记（如 \`\`\`json ），仅输出合法的 JSON 字符串本身！
 
 【🚨 核心指令（非常重要）】：
-你目前还没有获得知识库的全部内容。请务必使用工具（如 search_knowledge_base）去多次搜索和探索！
-1. 先搜索总体的模块列表。
-2. 然后针对每个模块，搜索其包含的详细功能点。
-3. 如果还有 MCP 外部工具，也可以视需要调用。
-4. 请【全面、详尽】地提取所有功能点，绝对不要只提取一个或进行简单摘要。
-只有当你认为已经收集齐所有信息时，才输出最终的 JSON 字符串。
+1. 你可能还没有获得知识库的全部内容。请务必使用工具（如 search_knowledge_base）去多次搜索和探索！
+2. 先搜索总体的模块列表。
+3. 然后针对每个模块，搜索其包含的详细功能点。
+4. 如果还有 MCP 外部工具或 HTTP 工具，也可以视需要调用。
+5. 请【全面、详尽】地提取所有功能点，绝对不要只提取一个或进行简单摘要。
+6. 只有当你认为已经收集齐所有信息时，才输出最终的 JSON 字符串。
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
 如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。
@@ -189,13 +214,14 @@ ${varDefinitions}
 ${globalContext.value || '无'}
 
 【整体规则】：
-${appSettings.standardText || '无'}
+${currentStandardText.value || '无'}
 
 【本次注意事项】：
 ${notes.value || '无'}
 
-【补充参考资料（用户手动输入）】：
+【补充参考资料】：
 ${referenceMaterials.value || '无'}
+${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base 获取更多）：\n' + kbContent.substring(0, 1000) + '... (内容较长已截断，请使用工具继续搜索)' : ''}
 `
 
     // Step 2: Request AI (Agent Loop)
@@ -305,20 +331,27 @@ ${referenceMaterials.value || '无'}
         break
       }
     }
-    // Clean up potential markdown formatting
-    jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim()
     
-    let aiData: any
+    // Robust JSON parsing
+    let aiData: any = null
     try {
-      aiData = JSON.parse(jsonStr)
-    } catch (err) {
-      console.error('AI output is not valid JSON:', jsonStr)
-      throw new Error('AI 未能生成合法的 JSON 数据')
+      // Find the first '{' and last '}' to handle text before/after JSON or markdown wrappers
+      const startIdx = jsonStr.indexOf('{')
+      const endIdx = jsonStr.lastIndexOf('}')
+      if (startIdx !== -1 && endIdx !== -1) {
+        const cleanStr = jsonStr.substring(startIdx, endIdx + 1)
+        aiData = JSON.parse(cleanStr)
+      } else {
+        throw new Error('未找到 JSON 对象包裹符')
+      }
+    } catch (err: any) {
+      console.error('AI output is not valid JSON:', jsonStr, err)
+      throw new Error(`AI 未能生成合法的 JSON 数据: ${err.message}。这可能是由于生成内容过长被截断，或模型输出了非法字符。`)
     }
 
     // Step 3: Render Document
     currentStep.value = 3
-    const buffer = await getTemplateBuffer(appSettings.templatePath)
+    const buffer = await getTemplateBuffer(currentTemplatePath.value)
     if (!buffer) {
       throw new Error('无法读取模板文件内容，请重新上传模板')
     }

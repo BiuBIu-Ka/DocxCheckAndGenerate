@@ -58,10 +58,10 @@ export async function selectTemplateFile(): Promise<{ path: string; name: string
   }
 }
 
-export async function saveTemplateBuffer(buffer: ArrayBuffer) {
+export async function saveTemplateBuffer(buffer: ArrayBuffer, id: string = 'web_template_buffer') {
   if (!isElectron) {
     // Web 环境下，将模板的二进制数据存入 IndexedDB
-    await localforage.setItem('web_template_buffer', buffer)
+    await localforage.setItem(id, buffer)
   }
 }
 
@@ -69,6 +69,9 @@ export async function getTemplateBuffer(path: string): Promise<ArrayBuffer | nul
   if (isElectron) {
     return await window.ipcRenderer.invoke('read-file', path)
   } else {
+    // 优先尝试用 path 作为 ID 读取，以支持多模板，后退回默认
+    const buf = await localforage.getItem(path)
+    if (buf) return buf as ArrayBuffer
     return await localforage.getItem('web_template_buffer')
   }
 }
