@@ -142,7 +142,19 @@ const templateVariables = ref<{name: string, description: string}[]>([])
 const knowledgeBases = ref<any[]>([])
 const selectedKbIds = ref<string[]>([])
 let appSettings: any = null
-let rawDocumentData: Record<string, any> = {}
+let rawDocumentData: Record<string, any> = { root: {}, entities: {} }
+let currentTemplateBuffer: ArrayBuffer | null = null
+
+interface TemplateLoopNode {
+  name: string
+  fields: string[]
+  children: TemplateLoopNode[]
+}
+
+interface TemplateSchema {
+  rootFields: string[]
+  loops: TemplateLoopNode[]
+}
 
 onMounted(async () => {
   await loadSettings()
@@ -358,6 +370,100 @@ function inspectRenderData(value: any) {
   return stats
 }
 
+function parseTemplateSchema(templateText: string): TemplateSchema {
+  const regex = /\{([a-zA-Z0-9_#\/]+)\}/g
+  const rootFields = new Set<string>()
+  const loops: TemplateLoopNode[] = []
+  const stack: TemplateLoopNode[] = []
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(templateText)) !== null) {
+    const tag = match[1]
+    if (!tag) continue
+
+    if (tag.startsWith('#')) {
+      const loopName = tag.slice(1).trim()
+      if (!loopName) continue
+      const node: TemplateLoopNode = { name: loopName, fields: [], children: [] }
+      const parent = stack[stack.length - 1]
+      if (parent) {
+        parent.children.push(node)
+      } else {
+        loops.push(node)
+      }
+      stack.push(node)
+      continue
+    }
+
+    if (tag.startsWith('/')) {
+      stack.pop()
+      continue
+    }
+
+    const currentLoop = stack[stack.length - 1]
+    if (currentLoop) {
+      if (!currentLoop.fields.includes(tag)) currentLoop.fields.push(tag)
+    } else {
+      rootFields.add(tag)
+    }
+  }
+
+  return {
+    rootFields: Array.from(rootFields),
+    loops,
+  }
+}
+
+function describeTemplateLoops(nodes: TemplateLoopNode[], parentName?: string, lines: string[] = []) {
+  for (const node of nodes) {
+    lines.push(`- 循环 ${node.name}${parentName ? `，父级为 ${parentName}` : '，顶层循环'}，字段: ${node.fields.join(', ') || '无'}`)
+    describeTemplateLoops(node.children, node.name, lines)
+  }
+  return lines
+}
+
+function buildRenderDataFromCanonical(schema: TemplateSchema, canonical: Record<string, any>) {
+  const rootSource = isPlainObject(canonical.root) ? canonical.root : {}
+  const entitySource = isPlainObject(canonical.entities) ? canonical.entities : {}
+
+  const buildLoopItems = (node: TemplateLoopNode, parentId?: string) => {
+    const sourceItems = Array.isArray(entitySource[node.name]) ? entitySource[node.name] : []
+    const filtered = sourceItems.filter((item: any) => {
+      if (!isPlainObject(item)) return false
+      const itemParent = typeof item._parent === 'string' ? item._parent : ''
+      return parentId ? itemParent === parentId : !itemParent
+    })
+
+    return filtered.slice(0, MAX_ARRAY_ITEMS).map((item: Record<string, any>, index: number) => {
+      const row: Record<string, any> = {}
+      for (const field of node.fields) {
+        if (item[field] !== undefined) {
+          row[field] = item[field]
+        }
+      }
+      const itemId = typeof item._id === 'string' && item._id ? item._id : `${node.name}-${index}`
+      for (const child of node.children) {
+        row[child.name] = buildLoopItems(child, itemId)
+      }
+      return row
+    })
+  }
+
+  const finalData: Record<string, any> = {}
+  for (const field of schema.rootFields) {
+    if (rootSource[field] !== undefined) {
+      finalData[field] = rootSource[field]
+    } else if (canonical[field] !== undefined) {
+      finalData[field] = canonical[field]
+    }
+  }
+  for (const loop of schema.loops) {
+    finalData[loop.name] = buildLoopItems(loop)
+  }
+
+  return finalData
+}
+
 function isPlainObject(value: any) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -380,7 +486,7 @@ function mergeObjectFields(target: any, source: any): any {
 }
 
 function parsePatchPath(path: string): Array<string | number> {
-  const normalized = (path || '').trim().replace(/^root\.?/, '')
+  const normalized = (path || '').trim()
   if (!normalized) return []
 
   const tokens: Array<string | number> = []
@@ -503,7 +609,9 @@ const generateDoc = async () => {
 
   generating.value = true
   currentStep.value = 0
-  rawDocumentData = {}
+  rawDocumentData = { root: {}, entities: {} }
+  previewJson.value = ''
+  finalPreviewData.value = null
   documentSummary.value = '正在准备生成...'
   generationLogs.value = []
   submitCount.value = 0
@@ -511,19 +619,34 @@ const generateDoc = async () => {
   try {
     // Step 1: Prepare data
     currentStep.value = 1
-
-    // Build JSON Schema hint based on docxtemplater tags
-    const loops = templateVariables.value.filter(t => t.name.startsWith('#')).map(t => t.name.substring(1))
-    const simpleVars = templateVariables.value.filter(t => !t.name.startsWith('#') && !t.name.startsWith('/'))
-
-    let schemaHint = "请严格按照以下 JSON 格式输出数据：\n{\n"
-    simpleVars.forEach(v => {
-      schemaHint += `  "${v.name}": "【请参考下方的说明进行填写】",\n`
+    currentTemplateBuffer = await getTemplateBuffer(currentTemplatePath.value)
+    if (!currentTemplateBuffer) {
+      throw new Error('无法读取模板文件内容，请重新上传模板')
+    }
+    const templateZip = new PizZip(currentTemplateBuffer)
+    const templateDoc = new Docxtemplater(templateZip, {
+      paragraphLoop: true,
+      linebreaks: true,
     })
-    loops.forEach(l => {
-      schemaHint += `  "${l}": [\n    {\n      // 数组项的字段请根据参考资料和变量含义推断并填充\n    }\n  ],\n`
-    })
-    schemaHint += "}"
+    const templateText = templateDoc.getFullText()
+    const templateSchema = parseTemplateSchema(templateText)
+
+    const loopDescriptions = describeTemplateLoops(templateSchema.loops).join('\n')
+    const canonicalSchemaHint = `请输出统一的标准中间结构（Canonical Structure），而不是直接输出模板嵌套树：
+{
+  "root": {
+    ${templateSchema.rootFields.map((field) => `"${field}": "..."`).join(',\n    ')}
+  },
+  "entities": {
+    ${templateSchema.loops.map((loop) => `"${loop.name}": [{ "_id": "${loop.name}-1", ${loop.fields.map((field) => `"${field}": "..."`).join(', ')} }]`).join(',\n    ')}
+  }
+}
+规则：
+- 顶层普通变量放进 root。
+- 每个循环块都对应 entities 下的同名数组。
+- 顶层循环数组项使用 "_id" 标识唯一主键。
+- 子循环数组项除了 "_id" 外，还必须使用 "_parent" 指向父级数组项的 _id。
+- 不要直接返回嵌套 children 数组，嵌套关系由系统根据 _parent 自动组装。`
 
     const varDefinitions = templateVariables.value
       .map(v => `- 【${v.name}】: ${v.description || '无具体说明，请根据上下文推断'}`)
@@ -533,32 +656,38 @@ const generateDoc = async () => {
     const kbContent = selectedKbs.map(k => `【知识库：${k.name}】\n${k.content}`).join('\n\n')
 
     const prompt = `
-你是一个专业的文档生成助手。你需要根据【全局系统背景】、【补充参考资料】和【整体规则】，生成一段符合【数据结构要求】的 JSON 格式数据。
+你是一个专业的文档生成助手。你需要根据【全局系统背景】、【补充参考资料】和【整体规则】，生成一段符合【统一标准结构】的 JSON Patch 数据。
 
 【🚨 终极核心指令（解决长文本生成的关键）】：
 由于最终的文档可能非常巨大，你 **绝对不要** 在最后一次性输出完整的 JSON 数据！
 请采取“边搜索，边提交 patch”的策略：
 1. 每次提交必须使用 \`submit_partial_data\`，并明确给出 \`operation\`、\`path\`、\`value\`。
-2. 默认优先使用 \`replace\`：当你拿到了某个数组或字段的最新完整结果，就直接 replace 该路径。
+2. 默认优先使用 \`replace\`：例如 \`root\`、\`entities.apps\`、\`entities.models\` 这类路径都优先 replace。
 3. 只有当你 **明确知道** 某个路径是“新增列表项”时，才使用 \`append\`。
 4. 当你只想补充对象里的部分字段时，才使用 \`merge\`。
-5. 严禁把整棵 JSON 树反复提交；每次只提交一个明确 path 的局部 patch。
-6. 每个文本字段请尽量精炼，通常不要超过 2000 字，严禁把原始资料整段照搬进单个字段。
-7. 单次提交不要过大，请控制在一个模块或一批功能点。
-8. 当你确信所有模块和所有所需数据都已经全部提交完毕后，请调用 \`finish_generation\` 工具结束流程。
+5. 严禁把最终模板树结构直接提交给系统；你只负责提交统一标准结构中的 root 和 entities。
+6. 严禁把整棵 JSON 树反复提交；每次只提交一个明确 path 的局部 patch。
+7. 每个文本字段请尽量精炼，通常不要超过 2000 字，严禁把原始资料整段照搬进单个字段。
+8. 单次提交不要过大，请控制在一个模块或一批功能点。
+9. 当你确信所有模块和所有所需数据都已经全部提交完毕后，请调用 \`finish_generation\` 工具结束流程。
 
 【Patch 协议说明】：
 - operation = replace: 用 value 整体替换 path 对应的字段，这是默认首选模式。
 - operation = merge: 仅用于对象，按字段递归合并；数组在 merge 中会整体替换，不会追加。
 - operation = append: 仅用于数组，表示只向该数组追加新增项。
 - path 示例：
-  - "apps"
-  - "apps[0].models"
-  - "apps[0].models[0].functions"
+  - "root"
+  - "root.APP_NAME"
+  - "entities.apps"
+  - "entities.models"
+  - "entities.childModels"
+  - "entities.functions"
 
-【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
-如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。每次提交局部数据时，请保持这个结构，只填充当前搜集到的部分。
-${schemaHint}
+【模板循环结构】：
+${loopDescriptions || '无循环结构'}
+
+【统一标准结构要求】：
+${canonicalSchemaHint}
 
 【变量含义与示例说明（非常重要，请严格遵守）】：
 ${varDefinitions}
@@ -758,7 +887,8 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     await nextTick()
     await yieldToUi() // 渲染前最后释放一次 UI，确保进度文字能显示出来
 
-    const finalData = sanitizeForDocx(rawDocumentData)
+    const canonicalData = sanitizeForDocx(rawDocumentData)
+    const finalData = buildRenderDataFromCanonical(templateSchema, canonicalData)
     const renderStats = inspectRenderData(finalData)
     documentSummary.value = `${summarizeDocumentData(finalData)}\n总文本字符: ${renderStats.totalStringChars}\n数组项总数: ${renderStats.totalArrayItems}\n最大字段长度: ${renderStats.maxStringLength}`
 
@@ -796,7 +926,7 @@ const exportDocx = async () => {
     await nextTick()
     await yieldToUi()
 
-    const buffer = await getTemplateBuffer(currentTemplatePath.value)
+    const buffer = currentTemplateBuffer || await getTemplateBuffer(currentTemplatePath.value)
     if (!buffer) {
       throw new Error('无法读取模板文件内容，请重新上传模板')
     }
