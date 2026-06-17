@@ -167,6 +167,10 @@ function appendGenerationLog(message: string) {
   generationLogs.value = [...generationLogs.value.slice(-11), message]
 }
 
+function yieldToUi() {
+  return new Promise(resolve => setTimeout(resolve, 10))
+}
+
 function summarizeDocumentData(data: Record<string, any>) {
   const parts: string[] = []
   const keys = Object.keys(data)
@@ -199,9 +203,14 @@ function trimMessageContent(content: string, maxLength = 4000) {
 }
 
 function compactMessages(messages: any[]) {
+  // 保持消息完整性，只对内容过长的消息进行截断，而不删除任何消息，以防止破坏 tool_calls 协议
   return messages.map((msg) => {
-    if (typeof msg?.content === 'string') {
-      return { ...msg, content: trimMessageContent(msg.content) }
+    // assistant 消息如果包含 tool_calls，其 content 通常为 null 或很短，不建议截断
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      return msg
+    }
+    if (typeof msg?.content === 'string' && msg.content.length > 2000) {
+      return { ...msg, content: trimMessageContent(msg.content, 2000) }
     }
     return msg
   })
@@ -436,55 +445,54 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       messages.push(msg)
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
+        // 先把 assistant 消息推入，确保后面紧跟 tool 消息
         for (const toolCall of msg.tool_calls as any[]) {
+          await yieldToUi() // 每个工具处理前都释放一次 UI
           let toolResult = ""
           
-          if (toolCall.function.name === 'submit_partial_data') {
-            try {
+          try {
+            if (toolCall.function.name === 'submit_partial_data') {
               const args = JSON.parse(toolCall.function.arguments)
               const payload = String(args.data || '')
               if (payload.length > 500000) {
-                throw new Error('单次提交数据过大，请只提交一个模块或一批增量数据')
-              }
-              if (seenPartialPayloads.has(payload)) {
-                toolResult = '检测到重复提交的局部数据，已忽略。请只提交新增增量，不要重复提交历史内容。'
+                toolResult = '错误：单次提交数据过大（超过 500KB），请分批提交。'
+              } else if (seenPartialPayloads.has(payload)) {
+                toolResult = '检测到重复提交的局部数据，已忽略。请只提交新增增量。'
               } else {
                 seenPartialPayloads.add(payload)
                 const partialData = JSON.parse(payload)
                 mergePartialData(rawDocumentData, partialData)
                 submitCount.value += 1
-                documentSummary.value = summarizeDocumentData(rawDocumentData)
+                // 降低摘要更新频率，每 2 次提交更新一次摘要
+                if (submitCount.value % 2 === 0) {
+                  documentSummary.value = summarizeDocumentData(rawDocumentData)
+                }
                 appendGenerationLog(args.progress || `已完成第 ${submitCount.value} 次局部提交`)
-                toolResult = `局部数据提交成功。当前累计提交 ${submitCount.value} 次。请继续提交剩余增量；全部完成后调用 finish_generation。`
+                toolResult = `成功接收增量数据。累计提交 ${submitCount.value} 次。`
               }
-            } catch (e: any) {
-              toolResult = "JSON 解析或合并失败: " + e.message + "。请确保你提交的 data 字段是一个合法的 JSON 字符串！"
-            }
-          } else if (toolCall.function.name === 'finish_generation') {
-            isFinished = true
-            toolResult = "生成流程结束指令已确认。"
-          } else {
-            // Check Internal Tools first
-            const internalTool = activeInternalTools.find(t => t.name === toolCall.function.name)
-            if (internalTool) {
-              try {
+            } else if (toolCall.function.name === 'finish_generation') {
+              isFinished = true
+              toolResult = "生成流程结束指令已确认。"
+            } else {
+              // Check Internal Tools first
+              const internalTool = activeInternalTools.find(t => t.name === toolCall.function.name)
+              if (internalTool) {
                 const args = JSON.parse(toolCall.function.arguments)
                 toolResult = await InternalToolManager.execute(internalTool, args, { kbContent })
-              } catch (e: any) {
-                toolResult = "Internal Tool Error: " + e.message
-              }
-            } else {
-              // Check MCP tools
-              const mcpItem = activeMcpTools.find(t => t.tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64) === toolCall.function.name)
-              if (mcpItem) {
-                 try {
-                     const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
-                     toolResult = trimMessageContent(JSON.stringify(res))
-                 } catch(e: any) { toolResult = "MCP Tool Error: " + e.message }
               } else {
-                 toolResult = "Tool not found"
+                // Check MCP tools
+                const mcpItem = activeMcpTools.find(t => t.tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64) === toolCall.function.name)
+                if (mcpItem) {
+                  const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
+                  toolResult = trimMessageContent(JSON.stringify(res), 3000)
+                } else {
+                  toolResult = "Tool not found"
+                }
               }
             }
+          } catch (e: any) {
+            console.error('Tool execution error:', e)
+            toolResult = "工具执行出错: " + e.message
           }
 
           messages.push({
@@ -505,7 +513,8 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     currentStep.value = 3
     documentSummary.value = summarizeDocumentData(rawDocumentData)
     await nextTick()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await yieldToUi() // 渲染前最后释放一次 UI，确保进度文字能显示出来
+
     const buffer = await getTemplateBuffer(currentTemplatePath.value)
     if (!buffer) {
       throw new Error('无法读取模板文件内容，请重新上传模板')
@@ -516,7 +525,14 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       linebreaks: true,
     })
 
-    doc.render(rawDocumentData)
+    // 最后的安全体检：防止数据体量异常爆表
+    const finalData = rawDocumentData
+    const totalItems = Object.values(finalData).reduce((acc: number, val: any) => acc + (Array.isArray(val) ? val.length : 0), 0)
+    if (totalItems > 10000) {
+      throw new Error(`数据规模过大 (${totalItems}项)，为防止卡死已拦截渲染。请尝试缩小生成范围。`)
+    }
+
+    doc.render(finalData)
 
     const outZip = doc.getZip().generate({
       type: 'uint8array',
