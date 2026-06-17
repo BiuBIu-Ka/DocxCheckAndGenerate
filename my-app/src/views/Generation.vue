@@ -212,14 +212,37 @@ function compactMessages(messages: any[]) {
   return [...head, ...tail]
 }
 
+const MAX_ARRAY_ITEMS = 5000
+const ARRAY_PUSH_CHUNK_SIZE = 200
+
+function safeAppendArray(target: any[], source: any[], path = 'root') {
+  if (!Array.isArray(target) || !Array.isArray(source)) return target
+  if (target === source) {
+    throw new Error(`检测到数组自引用追加: ${path}`)
+  }
+
+  if (source.length === 0) return target
+
+  const remaining = Math.max(0, MAX_ARRAY_ITEMS - target.length)
+  if (remaining === 0) {
+    return target
+  }
+
+  const toAppend = source.slice(0, remaining)
+  for (let i = 0; i < toAppend.length; i += ARRAY_PUSH_CHUNK_SIZE) {
+    const chunk = toAppend.slice(i, i + ARRAY_PUSH_CHUNK_SIZE)
+    target.push(...chunk)
+  }
+  return target
+}
+
 // 深合并函数：将 partialData 合并进 rawDocumentData 中。如果遇到数组，则将新项追加到原数组中。
-function mergePartialData(target: any, source: any) {
+function mergePartialData(target: any, source: any, path = 'root') {
   if (typeof target !== 'object' || target === null) return source
   if (typeof source !== 'object' || source === null) return source
 
   if (Array.isArray(target) && Array.isArray(source)) {
-    target.push(...source)
-    return target
+    return safeAppendArray(target, source, path)
   }
 
   if (Array.isArray(target) !== Array.isArray(source)) {
@@ -231,14 +254,15 @@ function mergePartialData(target: any, source: any) {
 
     const sourceVal = source[key]
     const targetVal = target[key]
+    const nextPath = `${path}.${key}`
 
     if (Array.isArray(targetVal) && Array.isArray(sourceVal)) {
-      targetVal.push(...sourceVal)
+      safeAppendArray(targetVal, sourceVal, nextPath)
     } else if (
       typeof targetVal === 'object' && targetVal !== null && !Array.isArray(targetVal) &&
       typeof sourceVal === 'object' && sourceVal !== null && !Array.isArray(sourceVal)
     ) {
-      target[key] = mergePartialData(targetVal, sourceVal)
+      target[key] = mergePartialData(targetVal, sourceVal, nextPath)
     } else {
       target[key] = sourceVal
     }
@@ -299,7 +323,8 @@ const generateDoc = async () => {
 2. 每次提交时，尽量提交“一个完整模块”或“一批完整功能点”，不要拆得过碎。
 3. 调用 \`submit_partial_data\` 工具时，只提交“新增数据增量”，绝对不要重复提交之前已经提交过的数据。
 4. 如果字段是数组，新提交的数据会自动追加到末尾，所以不要把历史完整数组反复重发。
-5. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
+5. 单次提交不要过大，请控制在一个模块或一批功能点，不要一次提交整份文档。
+6. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
 如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。每次提交局部数据时，请保持这个结构，只填充当前搜集到的部分。
@@ -423,6 +448,9 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
             try {
               const args = JSON.parse(toolCall.function.arguments)
               const payload = String(args.data || '')
+              if (payload.length > 500000) {
+                throw new Error('单次提交数据过大，请只提交一个模块或一批增量数据')
+              }
               if (seenPartialPayloads.has(payload)) {
                 toolResult = '检测到重复提交的局部数据，已忽略。请只提交新增增量，不要重复提交历史内容。'
               } else {
