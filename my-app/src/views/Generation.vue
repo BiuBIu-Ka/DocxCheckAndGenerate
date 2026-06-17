@@ -77,10 +77,15 @@
           </template>
           <el-steps :active="currentStep" direction="vertical">
             <el-step title="准备数据" description="收集参考资料与规则" />
-            <el-step title="AI 思考中" description="请求大模型生成结构化内容" />
-            <el-step title="渲染文档" description="将内容注入 DOCX 模板" />
+            <el-step title="AI Agent 思考与采集中" description="正在分批搜索并生成结构化数据..." />
+            <el-step title="渲染文档" description="将数据注入 DOCX 模板" />
             <el-step title="完成" description="导出文件" />
           </el-steps>
+          
+          <div v-if="currentStep === 2" style="margin-top: 20px;">
+            <div style="font-size: 13px; color: #666; margin-bottom: 8px;">已收集的局部数据预览 (实时合并)：</div>
+            <pre style="background: #f5f7fa; padding: 10px; font-size: 12px; border-radius: 4px; max-height: 300px; overflow: auto; margin: 0;">{{ JSON.stringify(documentData, null, 2) }}</pre>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -104,6 +109,7 @@ const referenceMaterials = ref('')
 const notes = ref('')
 const generating = ref(false)
 const currentStep = ref(0)
+const documentData = ref<any>({})
 
 const hasApiConfig = ref(false)
 const hasTemplate = ref(false)
@@ -152,6 +158,26 @@ const loadSettings = async () => {
   }
 }
 
+// 深合并函数：将 partialData 合并进 documentData 中。如果遇到数组，则将新项追加到原数组中。
+function mergePartialData(target: any, source: any) {
+  if (typeof target !== 'object' || target === null) return source;
+  if (typeof source !== 'object' || source === null) return source;
+
+  for (const key in source) {
+    if (Array.isArray(target[key]) && Array.isArray(source[key])) {
+      target[key] = target[key].concat(source[key]);
+    } else if (
+      typeof target[key] === 'object' && target[key] !== null && !Array.isArray(target[key]) &&
+      typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])
+    ) {
+      target[key] = mergePartialData(target[key], source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+
 const generateDoc = async () => {
   await loadSettings()
   if (!hasApiConfig.value) {
@@ -166,6 +192,7 @@ const generateDoc = async () => {
 
   generating.value = true
   currentStep.value = 0
+  documentData.value = {}
 
   try {
     // Step 1: Prepare data
@@ -192,19 +219,19 @@ const generateDoc = async () => {
     const kbContent = selectedKbs.map(k => `【知识库：${k.name}】\n${k.content}`).join('\n\n')
 
     const prompt = `
-你是一个专业的文档生成助手。你需要根据【全局系统背景】、【补充参考资料】和【整体规则】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
-请不要输出任何 markdown 标记（如 \`\`\`json ），仅输出合法的 JSON 字符串本身！
+你是一个专业的文档生成助手。你需要根据【全局系统背景】、【补充参考资料】和【整体规则】，生成一段符合【数据结构要求】的 JSON 格式数据。
 
-【🚨 核心指令（非常重要）】：
-1. 你可能还没有获得知识库的全部内容。请务必使用工具（如 search_knowledge_base）去多次搜索和探索！
-2. 先搜索总体的模块列表。
-3. 然后针对每个模块，搜索其包含的详细功能点。
-4. 如果还有 MCP 外部工具或 HTTP 工具，也可以视需要调用。
-5. 请【全面、详尽】地提取所有功能点，绝对不要只提取一个或进行简单摘要。
-6. 只有当你认为已经收集齐所有信息时，才输出最终的 JSON 字符串。
+【🚨 终极核心指令（解决长文本生成的关键）】：
+由于最终的文档可能非常巨大，你 **绝对不要** 在最后一次性输出完整的 JSON 数据！
+请采取“边搜索，边提交”的策略：
+1. 先搜索并整理某个模块的数据。
+2. 立即调用 \`submit_partial_data\` 工具，将该模块的 JSON 数据提交给我。系统会自动合并你提交的数据（如果是数组，会自动追加到末尾）。
+3. 然后继续搜索下一个模块，再次调用 \`submit_partial_data\` 提交。
+4. 重复这个过程，你可以调用几十次该工具！
+5. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
-如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。
+如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。每次提交局部数据时，请保持这个结构，只填充当前搜集到的部分。
 ${schemaHint}
 
 【变量含义与示例说明（非常重要，请严格遵守）】：
@@ -233,8 +260,6 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     // Load Internal Tools
     const activeInternalTools = await InternalToolManager.getActiveTools()
     for (const tool of activeInternalTools) {
-      // search_knowledge_base only makes sense if kbContent exists, 
-      // but to keep it extensible, we always provide it, it will just return empty if no KB selected.
       openAiTools.push({
         type: "function",
         function: {
@@ -244,6 +269,31 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
         }
       })
     }
+
+    // Add Incremental Core Tools
+    openAiTools.push({
+      type: "function",
+      function: {
+        name: "submit_partial_data",
+        description: "提交局部生成的 JSON 数据。对于长文档，你必须分多次调用此工具提交数据。如果字段是数组，新提交的数据会自动追加到现有数组末尾。",
+        parameters: {
+          type: "object",
+          properties: {
+            data: { type: "string", description: "局部的 JSON 数据字符串，务必保证其格式符合【数据结构要求】" },
+            progress: { type: "string", description: "当前进度说明，如'已完成通信模块的生成'" }
+          },
+          required: ["data"]
+        }
+      }
+    })
+    openAiTools.push({
+      type: "function",
+      function: {
+        name: "finish_generation",
+        description: "当你认为所有需要生成的数据都已经全部通过 submit_partial_data 提交完毕后，调用此工具结束整个生成流程。",
+        parameters: { type: "object", properties: {} }
+      }
+    })
 
     const activeMcpTools: any[] = []
     if (appSettings.mcpServers) {
@@ -275,10 +325,11 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     })
 
     let messages: any[] = [{ role: "user", content: prompt }]
-    let jsonStr = ''
     let loopCount = 0
+    let isFinished = false
 
-    while (loopCount < 20) {
+    // We increase the max loop count to allow for chunked generation of huge documents
+    while (loopCount < 100 && !isFinished) {
       loopCount++
       const reqPayload: any = {
         messages,
@@ -297,25 +348,39 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
         for (const toolCall of msg.tool_calls as any[]) {
           let toolResult = ""
           
-          // Check Internal Tools first
-          const internalTool = activeInternalTools.find(t => t.name === toolCall.function.name)
-          if (internalTool) {
+          if (toolCall.function.name === 'submit_partial_data') {
             try {
               const args = JSON.parse(toolCall.function.arguments)
-              toolResult = await InternalToolManager.execute(internalTool, args, { kbContent })
+              const partialData = JSON.parse(args.data)
+              documentData.value = mergePartialData(documentData.value, partialData)
+              toolResult = `局部数据提交成功。当前进度: ${args.progress || '无'}。请继续搜索并提交下一部分，如果全部完成请调用 finish_generation。`
             } catch (e: any) {
-              toolResult = "Internal Tool Error: " + e.message
+              toolResult = "JSON 解析或合并失败: " + e.message + "。请确保你提交的 data 字段是一个合法的 JSON 字符串！"
             }
+          } else if (toolCall.function.name === 'finish_generation') {
+            isFinished = true
+            toolResult = "生成流程结束指令已确认。"
           } else {
-            // Check MCP tools
-            const mcpItem = activeMcpTools.find(t => t.tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64) === toolCall.function.name)
-            if (mcpItem) {
-               try {
-                   const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
-                   toolResult = JSON.stringify(res)
-               } catch(e: any) { toolResult = "MCP Tool Error: " + e.message }
+            // Check Internal Tools first
+            const internalTool = activeInternalTools.find(t => t.name === toolCall.function.name)
+            if (internalTool) {
+              try {
+                const args = JSON.parse(toolCall.function.arguments)
+                toolResult = await InternalToolManager.execute(internalTool, args, { kbContent })
+              } catch (e: any) {
+                toolResult = "Internal Tool Error: " + e.message
+              }
             } else {
-               toolResult = "Tool not found"
+              // Check MCP tools
+              const mcpItem = activeMcpTools.find(t => t.tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64) === toolCall.function.name)
+              if (mcpItem) {
+                 try {
+                     const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
+                     toolResult = JSON.stringify(res)
+                 } catch(e: any) { toolResult = "MCP Tool Error: " + e.message }
+              } else {
+                 toolResult = "Tool not found"
+              }
             }
           }
 
@@ -327,28 +392,12 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
           })
         }
       } else {
-        jsonStr = msg.content || '{}'
+        // If AI stops calling tools but hasn't explicitly called finish_generation, we assume it's done.
+        isFinished = true
         break
       }
     }
     
-    // Robust JSON parsing
-    let aiData: any = null
-    try {
-      // Find the first '{' and last '}' to handle text before/after JSON or markdown wrappers
-      const startIdx = jsonStr.indexOf('{')
-      const endIdx = jsonStr.lastIndexOf('}')
-      if (startIdx !== -1 && endIdx !== -1) {
-        const cleanStr = jsonStr.substring(startIdx, endIdx + 1)
-        aiData = JSON.parse(cleanStr)
-      } else {
-        throw new Error('未找到 JSON 对象包裹符')
-      }
-    } catch (err: any) {
-      console.error('AI output is not valid JSON:', jsonStr, err)
-      throw new Error(`AI 未能生成合法的 JSON 数据: ${err.message}。这可能是由于生成内容过长被截断，或模型输出了非法字符。`)
-    }
-
     // Step 3: Render Document
     currentStep.value = 3
     const buffer = await getTemplateBuffer(currentTemplatePath.value)
@@ -361,7 +410,7 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       linebreaks: true,
     })
 
-    doc.render(aiData)
+    doc.render(documentData.value)
 
     const outZip = doc.getZip().generate({
       type: 'uint8array',
