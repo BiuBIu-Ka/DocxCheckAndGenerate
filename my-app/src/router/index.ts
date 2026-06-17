@@ -1,43 +1,48 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import Generation from '../views/Generation.vue'
-import Templates from '../views/Templates.vue'
-import Settings from '../views/Settings.vue'
-import Knowledge from '../views/Knowledge.vue'
-import Tools from '../views/Tools.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     {
       path: '/',
-      redirect: '/generation'
+      redirect: '/generation',
     },
     {
       path: '/generation',
       name: 'Generation',
-      component: Generation
+      component: () => import('../views/Generation.vue'),
     },
     {
       path: '/knowledge',
       name: 'Knowledge',
-      component: Knowledge
+      component: () => import('../views/Knowledge.vue'),
     },
     {
       path: '/templates',
       name: 'Templates',
-      component: Templates
+      component: () => import('../views/Templates.vue'),
     },
     {
       path: '/tools',
       name: 'Tools',
-      component: Tools
+      component: () => import('../views/Tools.vue'),
     },
     {
       path: '/settings',
       name: 'Settings',
-      component: Settings
-    }
-  ]
+      component: () => import('../views/Settings.vue'),
+    },
+    {
+      path: '/runs',
+      name: 'Runs',
+      component: () => import('../views/Runs.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'NotFound',
+      component: () => import('../views/NotFound.vue'),
+    },
+  ],
 })
 
 export default router

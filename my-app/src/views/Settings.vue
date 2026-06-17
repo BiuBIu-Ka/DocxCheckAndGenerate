@@ -1,85 +1,93 @@
 <template>
-  <div class="settings-container">
-    <h2>模型配置</h2>
-    <el-card class="box-card">
-      <template #header>
-        <div class="card-header">
-          <span>AI API 设置</span>
-        </div>
-      </template>
-      <el-form :model="form" label-width="120px">
-        <el-form-item label="API URL">
-          <el-input v-model="form.apiUrl" placeholder="例如：https://api.openai.com/v1" />
-          <div class="tip">填写兼容 OpenAI 格式的 API 基础地址</div>
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input v-model="form.apiKey" type="password" show-password placeholder="输入您的 API Key" />
-        </el-form-item>
-        <el-form-item label="模型名称">
-          <el-input v-model="form.modelName" placeholder="例如：gpt-4o, deepseek-chat" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="saveSettings" :loading="saving">保存配置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <div class="page-eyebrow">Model</div>
+        <h2>模型配置</h2>
+        <p>在不覆盖模板、知识库和工具配置的前提下，独立维护模型参数与调试偏好。</p>
+      </div>
+    </div>
+
+    <ModelSettingsForm
+      :model="model"
+      :saving="saving"
+      :testing="testing"
+      @update:model="model = $event"
+      @save="saveSettings"
+      @test="testConnection"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getSettings, saveSettings as saveAppSettings } from '../utils/bridge'
+import ModelSettingsForm from '../components/settings/ModelSettingsForm.vue'
+import type { ModelConfig } from '../types/app'
+import { getModelConfig, saveModelConfig, testModelConfig } from '../services/modelConfigService'
+import { useAppConfigStore } from '../stores/appConfig'
 
-const form = ref({
+const appConfig = useAppConfigStore()
+const saving = ref(false)
+const testing = ref(false)
+const model = ref<ModelConfig>({
   apiUrl: '',
   apiKey: '',
-  modelName: ''
-})
-const saving = ref(false)
-
-onMounted(async () => {
-  try {
-    const settings = await getSettings()
-    if (settings) {
-      form.value.apiUrl = settings.apiUrl || ''
-      form.value.apiKey = settings.apiKey || ''
-      form.value.modelName = settings.modelName || ''
-    }
-  } catch (error) {
-    console.error('Failed to load settings', error)
-  }
+  modelName: '',
+  temperature: 0.7,
+  maxRounds: 40,
+  debugEnabled: true,
 })
 
-const saveSettings = async () => {
+async function loadModel() {
+  model.value = await getModelConfig()
+}
+
+async function saveSettings() {
   saving.value = true
   try {
-    await saveAppSettings({
-      apiUrl: form.value.apiUrl,
-      apiKey: form.value.apiKey,
-      modelName: form.value.modelName
-    })
-    ElMessage.success('配置已保存')
-  } catch (error) {
-    ElMessage.error('保存失败')
+    await saveModelConfig(model.value)
+    await appConfig.load()
+    ElMessage.success('模型配置已保存')
+  } catch (error: any) {
+    ElMessage.error(`保存失败: ${error.message}`)
   } finally {
     saving.value = false
   }
 }
+
+async function testConnection() {
+  testing.value = true
+  try {
+    const result = await testModelConfig(model.value)
+    ElMessage.success(result.message)
+  } catch (error: any) {
+    ElMessage.error(error.message)
+  } finally {
+    testing.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadModel()
+})
 </script>
 
 <style scoped>
-.settings-container {
-  max-width: 800px;
-  margin: 0 auto;
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
-h2 {
-  margin-bottom: 20px;
+
+.page-eyebrow,
+.page-header p {
+  color: var(--text-secondary);
+  margin: 0;
 }
-.tip {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-  line-height: 1.2;
+
+.page-header h2 {
+  margin: 6px 0;
+  color: var(--text-primary);
 }
 </style>

@@ -1,7 +1,80 @@
-body {
+:root {
+  --app-bg: #0a1018;
+  --panel-bg: rgba(16, 24, 37, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --accent-primary: #5fa8ff;
+  --text-primary: #edf3fb;
+  --text-secondary: #96a6ba;
+  --text-tertiary: #6c7a8d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
-    'Noto Color Emoji';
+  min-height: 100%;
+}
+
+body {
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--app-bg);
+  color: var(--text-primary);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.el-card {
+  box-shadow: none !important;
+}
+
+.el-tabs__item,
+.el-form-item__label,
+.el-dialog__title,
+.el-drawer__title {
+  color: var(--text-primary) !important;
+}
+
+.el-textarea__inner,
+.el-input__wrapper,
+.el-select__wrapper,
+.el-input-number,
+.el-input-number__decrease,
+.el-input-number__increase {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: none !important;
+  color: var(--text-primary) !important;
+}
+
+.el-card__header,
+.el-card__body,
+.el-drawer__body,
+.el-dialog__body {
+  color: var(--text-primary);
+}
+
+.el-empty__description p,
+.el-tag,
+.el-table,
+.el-table th.el-table__cell,
+.el-table tr,
+.el-table td.el-table__cell {
+  color: var(--text-primary);
+}
+
+.el-table {
+  --el-table-bg-color: rgba(255, 255, 255, 0.02);
+  --el-table-tr-bg-color: transparent;
+  --el-table-border-color: rgba(255, 255, 255, 0.08);
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.04);
 }

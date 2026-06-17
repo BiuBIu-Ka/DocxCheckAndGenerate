@@ -1,298 +1,292 @@
 <template>
-  <div class="tools-container">
-    <h2>开放工具与插件管理</h2>
-    
-    <el-card class="box-card mb-4">
-      <template #header>
-        <div class="card-header">
-          <span>内部系统工具 (Internal Tools)</span>
-          <el-button type="success" size="small" @click="addHttpTool">添加 HTTP 工具</el-button>
-        </div>
-      </template>
-      
-      <el-collapse v-if="internalTools.length > 0" v-model="activeInternalToolNames">
-        <el-collapse-item v-for="(tool, index) in internalTools" :key="tool.id" :name="tool.id">
-          <template #title>
-            <span style="font-weight: 500;">{{ tool.name }}</span>
-            <el-tag :type="tool.type === 'system' ? 'primary' : 'warning'" size="small" style="margin-left: 10px;">
-              {{ tool.type === 'system' ? '内置系统工具' : 'HTTP 工具' }}
-            </el-tag>
-            <el-switch v-model="tool.enabled" @change="saveInternalTools" style="margin-left: 15px;" />
-          </template>
-          
-          <el-form label-width="120px">
-            <el-form-item label="工具名称" v-if="tool.type === 'http'">
-              <el-input v-model="tool.name" placeholder="例如：get_weather" @change="saveInternalTools" />
-            </el-form-item>
-            <el-form-item label="触发提示词">
-              <el-input
-                v-model="tool.description"
-                type="textarea"
-                :rows="2"
-                placeholder="告诉大模型什么时候该调用这个工具"
-                @change="saveInternalTools"
-              />
-            </el-form-item>
-            <el-form-item label="入参定义 (JSON)" v-if="tool.type === 'http'">
-              <el-input
-                v-model="tool.parametersStr"
-                type="textarea"
-                :rows="4"
-                placeholder='{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}'
-                @change="syncInternalToolParams(tool)"
-              />
-            </el-form-item>
-            
-            <!-- HTTP Tool Specific Config -->
-            <template v-if="tool.type === 'http'">
-              <el-form-item label="请求 URL">
-                <el-input v-model="tool.config.url" placeholder="https://api.example.com/data" @change="saveInternalTools" />
-              </el-form-item>
-              <el-form-item label="请求方法">
-                <el-select v-model="tool.config.method" @change="saveInternalTools">
-                  <el-option label="GET" value="GET" />
-                  <el-option label="POST" value="POST" />
-                </el-select>
-              </el-form-item>
-              <el-form-item>
-                <el-button type="danger" size="small" @click="removeInternalTool(index)">删除 HTTP 工具</el-button>
-              </el-form-item>
-            </template>
-          </el-form>
-        </el-collapse-item>
-      </el-collapse>
-    </el-card>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <div class="page-eyebrow">Tools</div>
+        <h2>工具与 MCP</h2>
+        <p>统一维护内部工具、HTTP 工具和 MCP 服务，同时查看最近运行中的工具使用情况。</p>
+      </div>
+    </div>
 
-    <el-card class="box-card">
-      <template #header>
-        <div class="card-header">
-          <span>MCP 外部服务 (Model Context Protocol)</span>
-          <el-button type="success" size="small" @click="addMcpServer">添加服务</el-button>
-        </div>
-      </template>
-      
-      <el-collapse v-if="mcpServers.length > 0" v-model="activeServerNames">
-        <el-collapse-item v-for="(server, index) in mcpServers" :key="server.id" :name="server.id">
-          <template #title>
-            <span style="font-weight: 500;">{{ server.name || '未命名服务' }}</span>
-            <el-tag :type="server.status === 'connected' ? 'success' : 'info'" size="small" style="margin-left: 10px;">
-              {{ server.status === 'connected' ? '已连接' : '未连接' }}
-            </el-tag>
-          </template>
-          
-          <el-form label-width="120px">
-            <el-form-item label="服务名称">
-              <el-input v-model="server.name" placeholder="例如：网页截图服务" @change="saveToolsConfig" />
-            </el-form-item>
-            <el-form-item label="执行命令">
-              <el-input v-model="server.command" placeholder="例如：npx" @change="saveToolsConfig" />
-            </el-form-item>
-            <el-form-item label="参数 (换行分隔)">
-              <el-input v-model="server.argsText" type="textarea" :rows="3" placeholder="-y&#10;@modelcontextprotocol/server-puppeteer" @change="syncArgs(server)" />
-            </el-form-item>
-            <el-form-item label="环境变量 (JSON)">
-              <el-input v-model="server.envText" type="textarea" :rows="3" placeholder='{"GITHUB_TOKEN": "your-token"}' @change="syncEnv(server)" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" @click="connectServer(server)" :loading="server.connecting">
-                {{ server.status === 'connected' ? '重新连接' : '连接并获取工具' }}
-              </el-button>
-              <el-button type="danger" @click="removeMcpServer(index)">删除配置</el-button>
-            </el-form-item>
-          </el-form>
+    <div class="summary-grid">
+      <ToolCallPreviewCard
+        title="内部工具"
+        :summary="`${internalTools.length} 个工具，其中 ${internalTools.filter(item => item.enabled).length} 个已启用`"
+      />
+      <ToolCallPreviewCard
+        title="MCP 服务"
+        :summary="`${mcpServers.length} 个服务，${mcpServers.filter(item => item.status === 'connected').length} 个已连接`"
+      />
+      <ToolCallPreviewCard
+        title="最近调用"
+        :summary="recentToolSummary"
+      />
+    </div>
 
-          <div v-if="server.tools && server.tools.length > 0" class="mt-4">
-            <h4 style="margin-bottom: 10px;">已加载的工具列表：</h4>
-            <el-table :data="server.tools" border size="small">
-              <el-table-column prop="name" label="工具名称" width="150" />
-              <el-table-column prop="description" label="功能描述" />
-            </el-table>
-          </div>
-        </el-collapse-item>
-      </el-collapse>
-      <el-empty v-else description="暂未配置 MCP 服务，点击右上角添加" />
-    </el-card>
+    <el-tabs>
+      <el-tab-pane label="内部工具">
+        <InternalToolsPanel
+          :tools="internalTools"
+          :saving="savingInternalTools"
+          @add="addInternalTool"
+          @save="saveInternalTools"
+          @remove="removeInternalTool"
+          @update-tool="updateInternalTool"
+          @update-tool-raw="updateInternalToolRaw"
+          @update-tool-config="updateInternalToolConfig"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="MCP 服务">
+        <McpServersPanel
+          :servers="mcpServers"
+          :saving="savingMcpServers"
+          @add="addMcpServer"
+          @save="saveMcpServers"
+          @remove="removeMcpServer"
+          @connect="connectServer"
+          @update-server="updateServer"
+          @update-server-raw="updateServerRaw"
+        />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { getSettings, saveSettings, connectMcpServer, getMcpTools, disconnectMcpServer } from '../utils/bridge'
-import { InternalToolManager } from '../utils/internalTools'
-import type { InternalTool } from '../utils/internalTools'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import InternalToolsPanel from '../components/tools/InternalToolsPanel.vue'
+import McpServersPanel from '../components/tools/McpServersPanel.vue'
+import ToolCallPreviewCard from '../components/tools/ToolCallPreviewCard.vue'
+import { connectMcpServer, disconnectMcpServer, getMcpTools } from '../utils/bridge'
+import { listInternalTools, listMcpServers, saveInternalTools as persistInternalTools, saveMcpServers as persistMcpServers, summarizeToolUsage, validateJsonInput } from '../services/toolService'
+import { useGenerationWorkbenchStore } from '../stores/generationWorkbench'
+import { useAppConfigStore } from '../stores/appConfig'
 
-const internalTools = ref<(InternalTool & { parametersStr?: string })[]>([])
-const activeInternalToolNames = ref<string[]>([])
-
+const workbench = useGenerationWorkbenchStore()
+const appConfig = useAppConfigStore()
+const internalTools = ref<any[]>([])
 const mcpServers = ref<any[]>([])
-const activeServerNames = ref<string[]>([])
+const savingInternalTools = ref(false)
+const savingMcpServers = ref(false)
 
-onMounted(async () => {
-  try {
-    // Load Internal Tools
-    const tools = await InternalToolManager.getAllTools()
-    internalTools.value = tools.map(t => ({
-      ...t,
-      parametersStr: t.type === 'http' ? JSON.stringify(t.parameters, null, 2) : ''
-    }))
-    activeInternalToolNames.value = tools.map(t => t.id)
-
-    // Load MCP Servers
-    const settings = await getSettings()
-    if (settings.mcpServers) {
-      mcpServers.value = settings.mcpServers.map((s: any) => ({
-        ...s,
-        argsText: s.args ? s.args.join('\n') : '',
-        envText: s.env ? JSON.stringify(s.env, null, 2) : '',
-        status: 'disconnected',
-        connecting: false,
-        tools: []
-      }))
-    }
-  } catch (error) {
-    console.error('Failed to load tools config', error)
-  }
+const recentToolSummary = computed(() => {
+  const toolName = internalTools.value[0]?.name
+  if (!toolName) return '暂无可统计的工具调用'
+  return summarizeToolUsage(toolName, workbench.recentRuns)
 })
 
-onUnmounted(async () => {})
-
-// --- Internal Tools Logic ---
-const saveInternalTools = async () => {
-  try {
-    const toolsToSave = internalTools.value.map(t => {
-      const { parametersStr, ...rest } = t
-      return rest
-    })
-    await InternalToolManager.saveTools(toolsToSave)
-    ElMessage.success('内部工具配置已保存')
-  } catch (error) {
-    ElMessage.error('保存失败')
+function normalizeInternalTool(tool: any) {
+  return {
+    ...tool,
+    parametersText: tool.type === 'http' ? JSON.stringify(tool.parameters, null, 2) : '',
+    parametersError: '',
   }
 }
 
-const syncInternalToolParams = (tool: any) => {
-  try {
-    tool.parameters = JSON.parse(tool.parametersStr)
-    saveInternalTools()
-  } catch (e) {
-    // Ignore invalid JSON while typing
+function normalizeMcpServer(server: any) {
+  return {
+    ...server,
+    argsText: Array.isArray(server.args) ? server.args.join('\n') : '',
+    envText: server.env ? JSON.stringify(server.env, null, 2) : '',
+    envError: '',
+    status: server.status || 'disconnected',
+    connecting: false,
+    tools: server.tools || [],
   }
 }
 
-const addHttpTool = () => {
-  const newId = 'http_' + Date.now()
-  internalTools.value.push({
-    id: newId,
+async function refreshTools() {
+  internalTools.value = (await listInternalTools()).map(normalizeInternalTool)
+  mcpServers.value = (await listMcpServers()).map(normalizeMcpServer)
+  await workbench.loadRecentRuns()
+}
+
+function updateInternalTool(nextTool: any) {
+  internalTools.value = internalTools.value.map((item) => item.id === nextTool.id ? nextTool : item)
+}
+
+function updateInternalToolRaw(id: string, key: string, value: string) {
+  internalTools.value = internalTools.value.map((item) => {
+    if (item.id !== id) return item
+    const parsed = validateJsonInput(value)
+    return {
+      ...item,
+      [key]: value,
+      parameters: parsed.ok ? (parsed.value || item.parameters) : item.parameters,
+      parametersError: parsed.ok ? '' : parsed.message,
+    }
+  })
+}
+
+function updateInternalToolConfig(id: string, key: string, value: string) {
+  internalTools.value = internalTools.value.map((item) =>
+    item.id === id
+      ? {
+          ...item,
+          config: {
+            ...(item.config || {}),
+            [key]: value,
+          },
+        }
+      : item,
+  )
+}
+
+function addInternalTool() {
+  internalTools.value.push(normalizeInternalTool({
+    id: `http_${Date.now()}`,
     name: 'custom_http_tool',
-    description: '这是一个自定义HTTP工具',
+    description: '这是一个自定义 HTTP 工具',
     parameters: { type: 'object', properties: {}, required: [] },
-    parametersStr: '{"type":"object","properties":{},"required":[]}',
     type: 'http',
     enabled: true,
-    config: { url: '', method: 'GET' }
+    config: { url: '', method: 'GET' },
+  }))
+}
+
+function removeInternalTool(id: string) {
+  internalTools.value = internalTools.value.filter((item) => item.id !== id)
+}
+
+async function saveInternalTools() {
+  savingInternalTools.value = true
+  try {
+    const invalid = internalTools.value.find((item) => item.parametersError)
+    if (invalid) {
+      throw new Error(`工具 ${invalid.name} 的参数 JSON 不合法`)
+    }
+    const payload = internalTools.value.map(({ parametersText, parametersError, ...rest }) => rest)
+    internalTools.value = (await persistInternalTools(payload)).map(normalizeInternalTool)
+    await appConfig.load()
+    ElMessage.success('内部工具已保存')
+  } catch (error: any) {
+    ElMessage.error(error.message)
+  } finally {
+    savingInternalTools.value = false
+  }
+}
+
+function updateServer(nextServer: any) {
+  mcpServers.value = mcpServers.value.map((item) => item.id === nextServer.id ? nextServer : item)
+}
+
+function updateServerRaw(id: string, key: string, value: string) {
+  mcpServers.value = mcpServers.value.map((item) => {
+    if (item.id !== id) return item
+    if (key === 'argsText') {
+      return {
+        ...item,
+        argsText: value,
+        args: value.split('\n').map((part: string) => part.trim()).filter(Boolean),
+      }
+    }
+    const parsed = validateJsonInput(value)
+    return {
+      ...item,
+      envText: value,
+      env: parsed.ok ? parsed.value : item.env,
+      envError: parsed.ok ? '' : parsed.message,
+    }
   })
-  activeInternalToolNames.value.push(newId)
-  saveInternalTools()
 }
 
-const removeInternalTool = (index: number) => {
-  internalTools.value.splice(index, 1)
-  saveInternalTools()
-}
-
-// --- MCP Servers Logic ---
-const saveToolsConfig = async () => {
-  try {
-    const settings = await getSettings()
-    settings.mcpServers = mcpServers.value.map(s => ({
-      id: s.id,
-      name: s.name,
-      command: s.command,
-      args: s.args,
-      env: s.env
-    }))
-    await saveSettings(settings)
-    ElMessage.success('MCP 配置已保存')
-  } catch (error) {
-    ElMessage.error('保存失败')
-  }
-}
-
-const syncArgs = (server: any) => {
-  server.args = server.argsText.split('\n').map((s: string) => s.trim()).filter((s: string) => s)
-  saveToolsConfig()
-}
-
-const syncEnv = (server: any) => {
-  try {
-    server.env = server.envText ? JSON.parse(server.envText) : undefined
-    saveToolsConfig()
-  } catch (e) {
-    // ignore
-  }
-}
-
-const addMcpServer = () => {
-  const newId = 'mcp_' + Date.now()
-  mcpServers.value.push({
-    id: newId,
+function addMcpServer() {
+  mcpServers.value.push(normalizeMcpServer({
+    id: `mcp_${Date.now()}`,
     name: '新建 MCP 服务',
     command: '',
     args: [],
-    argsText: '',
     env: undefined,
-    envText: '',
-    status: 'disconnected',
-    connecting: false,
-    tools: []
-  })
-  activeServerNames.value.push(newId)
-  saveToolsConfig()
+  }))
 }
 
-const removeMcpServer = async (index: number) => {
-  const server = mcpServers.value[index]
+async function saveMcpServers() {
+  savingMcpServers.value = true
   try {
-    await disconnectMcpServer(server.id)
-  } catch(e) {}
-  mcpServers.value.splice(index, 1)
-  saveToolsConfig()
+    const invalid = mcpServers.value.find((item) => item.envError)
+    if (invalid) {
+      throw new Error(`服务 ${invalid.name} 的环境变量 JSON 不合法`)
+    }
+    const payload = mcpServers.value.map(({ argsText, envText, envError, connecting, tools, ...rest }) => rest)
+    mcpServers.value = (await persistMcpServers(payload)).map(normalizeMcpServer)
+    await appConfig.load()
+    ElMessage.success('MCP 配置已保存')
+  } catch (error: any) {
+    ElMessage.error(error.message)
+  } finally {
+    savingMcpServers.value = false
+  }
 }
 
-const connectServer = async (server: any) => {
-  if (!server.command) return ElMessage.warning('请输入执行命令')
+async function removeMcpServer(id: string) {
+  try {
+    await disconnectMcpServer(id)
+  } catch {
+    // ignore
+  }
+  mcpServers.value = mcpServers.value.filter((item) => item.id !== id)
+}
+
+async function connectServer(id: string) {
+  const server = mcpServers.value.find((item) => item.id === id)
+  if (!server) return
+  if (!server.command) {
+    return ElMessage.warning('请输入执行命令')
+  }
+
   server.connecting = true
   try {
     const connected = await connectMcpServer(server.id, server.command, server.args || [], server.env)
-    if (connected) {
-      server.status = 'connected'
-      server.tools = await getMcpTools(server.id)
-      ElMessage.success(`[${server.name}] 连接成功，加载了 ${server.tools.length} 个工具`)
+    if (!connected) {
+      throw new Error('当前环境不支持连接 MCP 服务')
     }
+    server.tools = await getMcpTools(server.id)
+    server.status = 'connected'
+    server.envError = ''
+    ElMessage.success(`[${server.name}] 已连接并加载 ${server.tools.length} 个工具`)
   } catch (error: any) {
     server.status = 'disconnected'
-    ElMessage.error(`[${server.name}] 连接失败: ` + error.message)
+    server.lastError = error.message
+    ElMessage.error(`[${server.name}] 连接失败: ${error.message}`)
   } finally {
     server.connecting = false
   }
 }
+
+onMounted(async () => {
+  await refreshTools()
+})
 </script>
 
 <style scoped>
-.tools-container {
-  max-width: 900px;
-  margin: 0 auto;
-}
-.mb-4 {
-  margin-bottom: 16px;
-}
-.mt-4 {
-  margin-top: 16px;
-}
-.card-header {
+.page-shell {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-eyebrow,
+.page-header p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.page-header h2 {
+  margin: 6px 0;
+  color: var(--text-primary);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1200px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -1,179 +1,183 @@
 <template>
-  <div class="knowledge-container">
-    <h2>知识库管理</h2>
-    <el-row :gutter="20">
-      <el-col :span="8">
-        <el-card class="box-card">
-          <template #header>
-            <div class="card-header">
-              <span>知识库列表</span>
-              <el-button type="primary" size="small" @click="createKb">新建知识库</el-button>
-            </div>
-          </template>
-          <el-menu :default-active="activeKbId" @select="selectKb" class="kb-menu">
-            <el-menu-item v-for="kb in kbs" :key="kb.id" :index="kb.id">
-              <span class="kb-name" :title="kb.name">{{ kb.name }}</span>
-              <el-button type="danger" link size="small" @click.stop="deleteKb(kb.id)">删除</el-button>
-            </el-menu-item>
-            <div v-if="kbs.length === 0" class="empty-tip">暂无知识库，请新建</div>
-          </el-menu>
-        </el-card>
-      </el-col>
-      <el-col :span="16">
-        <el-card class="box-card" v-if="activeKb">
-          <template #header>
-            <div class="card-header">
-              <el-input v-model="activeKb.name" style="width: 250px" @change="saveKbs" placeholder="请输入知识库名称" />
-              <el-button type="success" size="small" @click="uploadFiles">上传文档</el-button>
-            </div>
-          </template>
-          <div class="files-list mb-4" v-if="activeKb.files && activeKb.files.length > 0">
-            <span style="font-size: 14px; margin-right: 8px;">已解析的文件：</span>
-            <el-tag v-for="f in activeKb.files" :key="f" class="mr-2 mb-2" closable @close="removeFile(f)">{{ f }}</el-tag>
-          </div>
-          <el-input
-            v-model="activeKb.content"
-            type="textarea"
-            :rows="18"
-            placeholder="知识库的内容（上传 txt/md/docx 文档后，系统会自动提取纯文本追加于此，您也可以在此手动编辑补充）"
-            @change="saveKbs"
-          />
-        </el-card>
-        <el-empty v-else description="请从左侧选择或新建一个知识库" />
-      </el-col>
-    </el-row>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <div class="page-eyebrow">Knowledge</div>
+        <h2>知识库</h2>
+        <p>维护知识正文、文件来源和统计信息，方便在生成中台进行选择和检索。</p>
+      </div>
+    </div>
+
+    <div class="page-grid">
+      <KnowledgeListPanel
+        :knowledge-bases="knowledgeBases"
+        :selected-id="selectedKnowledgeBaseId"
+        @create="createKnowledgeBase"
+        @select="selectKnowledgeBase"
+        @delete="deleteKnowledgeBase"
+      />
+
+      <KnowledgeEditorPanel
+        :knowledge-base="currentKnowledgeBase"
+        :saving="saving"
+        @update:knowledge-base="currentKnowledgeBase = $event"
+        @upload="uploadFiles"
+        @save="saveKnowledgeBase"
+      />
+
+      <KnowledgeStatsPanel
+        :knowledge-base="currentKnowledgeBase"
+        @remove-file="removeFile"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { getSettings, saveSettings, selectAndExtractTextFiles } from '../utils/bridge'
+import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import KnowledgeListPanel from '../components/knowledge/KnowledgeListPanel.vue'
+import KnowledgeEditorPanel from '../components/knowledge/KnowledgeEditorPanel.vue'
+import KnowledgeStatsPanel from '../components/knowledge/KnowledgeStatsPanel.vue'
+import type { KnowledgeBaseRecord } from '../types/app'
+import { listKnowledgeBases, saveKnowledgeBases, uploadKnowledgeFiles } from '../services/knowledgeService'
+import { useAppConfigStore } from '../stores/appConfig'
 
-const kbs = ref<any[]>([])
-const activeKbId = ref('')
+const appConfig = useAppConfigStore()
+const knowledgeBases = ref<KnowledgeBaseRecord[]>([])
+const selectedKnowledgeBaseId = ref('')
+const currentKnowledgeBase = ref<KnowledgeBaseRecord | undefined>()
+const saving = ref(false)
 
-const activeKb = computed(() => kbs.value.find(k => k.id === activeKbId.value))
+async function refreshKnowledgeBases() {
+  knowledgeBases.value = await listKnowledgeBases()
+  if (!selectedKnowledgeBaseId.value && knowledgeBases.value[0]) {
+    await selectKnowledgeBase(knowledgeBases.value[0].id)
+  }
+}
+
+async function selectKnowledgeBase(id: string) {
+  selectedKnowledgeBaseId.value = id
+  const found = knowledgeBases.value.find((item) => item.id === id)
+  currentKnowledgeBase.value = found ? JSON.parse(JSON.stringify(found)) : undefined
+}
+
+async function createKnowledgeBase() {
+  const next: KnowledgeBaseRecord = {
+    id: Date.now().toString(),
+    name: `新建知识库 ${knowledgeBases.value.length + 1}`,
+    content: '',
+    files: [],
+    updatedAt: new Date().toISOString(),
+  }
+  knowledgeBases.value = [...knowledgeBases.value, next]
+  currentKnowledgeBase.value = next
+  selectedKnowledgeBaseId.value = next.id
+  await saveKnowledgeBases(knowledgeBases.value)
+  await appConfig.load()
+}
+
+async function saveKnowledgeBase() {
+  if (!currentKnowledgeBase.value) return
+  saving.value = true
+  try {
+    const next = knowledgeBases.value.map((item) =>
+      item.id === currentKnowledgeBase.value?.id ? currentKnowledgeBase.value : item,
+    )
+    knowledgeBases.value = await saveKnowledgeBases(next)
+    await appConfig.load()
+    await selectKnowledgeBase(currentKnowledgeBase.value.id)
+    ElMessage.success('知识库已保存')
+  } catch (error: any) {
+    ElMessage.error(`保存失败: ${error.message}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function deleteKnowledgeBase(id: string) {
+  try {
+    await ElMessageBox.confirm('确定删除这个知识库吗？', '提示', { type: 'warning' })
+    knowledgeBases.value = await saveKnowledgeBases(knowledgeBases.value.filter((item) => item.id !== id))
+    await appConfig.load()
+    if (selectedKnowledgeBaseId.value === id) {
+      selectedKnowledgeBaseId.value = ''
+      currentKnowledgeBase.value = undefined
+    }
+    await refreshKnowledgeBases()
+    ElMessage.success('知识库已删除')
+  } catch {
+    // ignore
+  }
+}
+
+async function uploadFiles() {
+  if (!currentKnowledgeBase.value) return
+  try {
+    const files = await uploadKnowledgeFiles()
+    if (files.length === 0) return
+
+    const nextFiles = [...currentKnowledgeBase.value.files]
+    let content = currentKnowledgeBase.value.content
+    for (const file of files) {
+      if (!nextFiles.includes(file.name)) nextFiles.push(file.name)
+      content += `\n\n--- 以下内容提取自文件：${file.name} ---\n${file.content}`
+    }
+
+    currentKnowledgeBase.value = {
+      ...currentKnowledgeBase.value,
+      files: nextFiles,
+      content,
+    }
+    await saveKnowledgeBase()
+    ElMessage.success(`成功导入 ${files.length} 个文件`)
+  } catch (error: any) {
+    ElMessage.error(`文件读取失败: ${error.message}`)
+  }
+}
+
+async function removeFile(filename: string) {
+  if (!currentKnowledgeBase.value) return
+  currentKnowledgeBase.value = {
+    ...currentKnowledgeBase.value,
+    files: currentKnowledgeBase.value.files.filter((item) => item !== filename),
+  }
+  await saveKnowledgeBase()
+  ElMessage.warning('已移除文件标签，正文内容需手动确认是否删除')
+}
 
 onMounted(async () => {
-  try {
-    const settings = await getSettings()
-    kbs.value = settings.knowledgeBases || []
-    if (kbs.value.length > 0) activeKbId.value = kbs.value[0].id
-  } catch (error) {
-    console.error('Failed to load settings', error)
-  }
+  await refreshKnowledgeBases()
 })
-
-const saveKbs = async () => {
-  try {
-    const settings = await getSettings()
-    settings.knowledgeBases = kbs.value
-    await saveSettings(settings)
-  } catch (error) {
-    ElMessage.error('保存失败')
-  }
-}
-
-const createKb = async () => {
-  const newKb = {
-    id: Date.now().toString(),
-    name: '新建知识库 ' + (kbs.value.length + 1),
-    content: '',
-    files: []
-  }
-  kbs.value.push(newKb)
-  activeKbId.value = newKb.id
-  await saveKbs()
-}
-
-const selectKb = (id: string) => {
-  activeKbId.value = id
-}
-
-const deleteKb = async (id: string) => {
-  try {
-    await ElMessageBox.confirm('确认删除该知识库？删除后无法恢复。', '提示', { type: 'warning' })
-    kbs.value = kbs.value.filter(k => k.id !== id)
-    if (activeKbId.value === id) {
-      activeKbId.value = kbs.value.length > 0 ? kbs.value[0].id : ''
-    }
-    await saveKbs()
-    ElMessage.success('已删除')
-  } catch {
-    // cancelled
-  }
-}
-
-const uploadFiles = async () => {
-  try {
-    const files = await selectAndExtractTextFiles()
-    if (files.length > 0) {
-      if (!activeKb.value.files) activeKb.value.files = []
-      
-      let appendedContent = ''
-      for (const f of files) {
-        if (!activeKb.value.files.includes(f.name)) {
-          activeKb.value.files.push(f.name)
-        }
-        appendedContent += `\n\n--- 以下内容提取自文件：${f.name} ---\n${f.content}`
-      }
-      activeKb.value.content += appendedContent
-      await saveKbs()
-      ElMessage.success(`成功解析并添加 ${files.length} 个文件内容`)
-    }
-  } catch (error: any) {
-    ElMessage.error('文件读取失败: ' + error.message)
-  }
-}
-
-const removeFile = async (filename: string) => {
-  activeKb.value.files = activeKb.value.files.filter((f: string) => f !== filename)
-  // 注意：移除文件标签并不会自动删除内容里的文本，需用户手动清理文本框。这里主要用于文件标记管理。
-  await saveKbs()
-}
 </script>
 
 <style scoped>
-.knowledge-container {
-  max-width: 1200px;
-  margin: 0 auto;
-}
-h2 {
-  margin-bottom: 20px;
-}
-.card-header {
+.page-shell {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 18px;
 }
-.kb-menu {
-  border-right: none;
+
+.page-eyebrow,
+.page-header p {
+  color: var(--text-secondary);
+  margin: 0;
 }
-.el-menu-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+
+.page-header h2 {
+  margin: 6px 0;
+  color: var(--text-primary);
 }
-.kb-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+
+.page-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
+  gap: 16px;
 }
-.empty-tip {
-  padding: 20px;
-  text-align: center;
-  color: #909399;
-  font-size: 14px;
-}
-.mr-2 {
-  margin-right: 8px;
-}
-.mb-2 {
-  margin-bottom: 8px;
-}
-.mb-4 {
-  margin-bottom: 16px;
+
+@media (max-width: 1380px) {
+  .page-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
