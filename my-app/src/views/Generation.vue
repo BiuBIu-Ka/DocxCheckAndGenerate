@@ -160,19 +160,37 @@ const loadSettings = async () => {
 
 // 深合并函数：将 partialData 合并进 documentData 中。如果遇到数组，则将新项追加到原数组中。
 function mergePartialData(target: any, source: any) {
+  // 如果 target 或 source 不是对象（或者为 null），直接返回 source 覆盖
   if (typeof target !== 'object' || target === null) return source;
   if (typeof source !== 'object' || source === null) return source;
 
+  // 如果两者都是数组，执行追加 (Concat)
+  if (Array.isArray(target) && Array.isArray(source)) {
+    return target.concat(source);
+  }
+
+  // 如果一个是数组一个不是数组，直接用 source 覆盖 target
+  if (Array.isArray(target) !== Array.isArray(source)) {
+    return source;
+  }
+
+  // 遍历 source 的键进行深合并
   for (const key in source) {
-    if (Array.isArray(target[key]) && Array.isArray(source[key])) {
-      target[key] = target[key].concat(source[key]);
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+
+    const sourceVal = source[key];
+    const targetVal = target[key];
+
+    if (Array.isArray(targetVal) && Array.isArray(sourceVal)) {
+      target[key] = targetVal.concat(sourceVal);
     } else if (
-      typeof target[key] === 'object' && target[key] !== null && !Array.isArray(target[key]) &&
-      typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])
+      typeof targetVal === 'object' && targetVal !== null && !Array.isArray(targetVal) &&
+      typeof sourceVal === 'object' && sourceVal !== null && !Array.isArray(sourceVal)
     ) {
-      target[key] = mergePartialData(target[key], source[key]);
+      target[key] = mergePartialData(targetVal, sourceVal);
     } else {
-      target[key] = source[key];
+      // 基础类型或其他情况，直接覆盖
+      target[key] = sourceVal;
     }
   }
   return target;
@@ -352,7 +370,11 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
             try {
               const args = JSON.parse(toolCall.function.arguments)
               const partialData = JSON.parse(args.data)
-              documentData.value = mergePartialData(documentData.value, partialData)
+              
+              // To ensure reactivity in Vue, we need to re-assign the cloned merged object
+              const merged = mergePartialData(JSON.parse(JSON.stringify(documentData.value)), partialData)
+              documentData.value = merged
+              
               toolResult = `局部数据提交成功。当前进度: ${args.progress || '无'}。请继续搜索并提交下一部分，如果全部完成请调用 finish_generation。`
             } catch (e: any) {
               toolResult = "JSON 解析或合并失败: " + e.message + "。请确保你提交的 data 字段是一个合法的 JSON 字符串！"
