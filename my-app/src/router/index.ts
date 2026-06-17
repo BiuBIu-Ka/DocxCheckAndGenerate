@@ -3,6 +3,7 @@ import Generation from '../views/Generation.vue'
 import Templates from '../views/Templates.vue'
 import Settings from '../views/Settings.vue'
 import Knowledge from '../views/Knowledge.vue'
+import Tools from '../views/Tools.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -25,6 +26,11 @@ const router = createRouter({
       path: '/templates',
       name: 'Templates',
       component: Templates
+    },
+    {
+      path: '/tools',
+      name: 'Tools',
+      component: Tools
     },
     {
       path: '/settings',

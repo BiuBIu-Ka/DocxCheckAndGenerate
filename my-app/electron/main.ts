@@ -3,6 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import Store from 'electron-store'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const store = new Store()
@@ -95,4 +97,48 @@ ipcMain.handle('save-file', (_, { filePath, buffer }) => {
   } catch (error: any) {
     throw new Error(`Failed to save file: ${error.message}`)
   }
+})
+
+// MCP Handlers
+const activeMcpClients: Record<string, Client> = {}
+
+ipcMain.handle('connect-mcp-server', async (_, { id, command, args }) => {
+  try {
+    if (activeMcpClients[id]) {
+      await activeMcpClients[id].close()
+      delete activeMcpClients[id]
+    }
+    const transport = new StdioClientTransport({ command, args })
+    const client = new Client(
+      { name: "my-app-mcp-client", version: "1.0.0" },
+      { capabilities: { tools: {} } }
+    )
+    await client.connect(transport)
+    activeMcpClients[id] = client
+    return true
+  } catch (error: any) {
+    throw new Error(`Failed to connect MCP server: ${error.message}`)
+  }
+})
+
+ipcMain.handle('get-mcp-tools', async (_, id) => {
+  const client = activeMcpClients[id]
+  if (!client) throw new Error(`MCP server ${id} not connected`)
+  const response = await client.listTools()
+  return response.tools
+})
+
+ipcMain.handle('call-mcp-tool', async (_, { id, name, args }) => {
+  const client = activeMcpClients[id]
+  if (!client) throw new Error(`MCP server ${id} not connected`)
+  const response = await client.callTool({ name, arguments: args })
+  return response
+})
+
+ipcMain.handle('disconnect-mcp-server', async (_, id) => {
+  if (activeMcpClients[id]) {
+    await activeMcpClients[id].close()
+    delete activeMcpClients[id]
+  }
+  return true
 })

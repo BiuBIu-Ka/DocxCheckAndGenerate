@@ -1,43 +1,46 @@
-# AI 文档生成 - Function Calling (工具调用) 架构升级计划
+# AI 文档生成 - 开放式工具调用 (MCP) 架构升级计划
 
 ## 1. 摘要 (Summary)
-当前系统采用“单次全量 Prompt 注入”的方式，如果知识库内容过多，容易导致大模型出现遗漏、摘要化或超出上下文窗口等问题。
-本计划旨在引入 **Agent Function Calling（工具调用）** 机制。AI 将化身为主动探索的 Agent：首先获取模板的数据结构，然后**主动调用搜索工具**从知识库中按需获取各个模块/功能点的详细信息，最后再拼接出完整的高质量 JSON 数据，彻底解决长文本下的生成遗漏问题。
+为了彻底解决单次全量文本生成导致的“内容遗漏”问题，并为未来扩展（如网页截图、外部数据查询等）打下基础，本项目将升级为 **Agent Function Calling（工具调用）** 架构。
+更重要的是，系统将**开放工具管理能力**，允许用户自定义工具，并深度集成 **MCP (Model Context Protocol)** 服务。AI 将作为一个智能体，根据当前任务自动从用户配置的工具库（包括本地知识库检索、MCP外部工具）中选取并调用所需能力，逐步搜集信息并最终生成高质量的结构化文档。
 
 ## 2. 当前状态分析 (Current State Analysis)
-*   **当前生成模式**：在 `Generation.vue` 中，将用户选择的知识库全文直接拼接进 `prompt`，请求一次 OpenAI 接口，要求其直接返回 JSON。
-*   **痛点**：大模型对超长文本的注意力机制（Attention）存在衰减，容易“偷懒”只提取开头几个功能，忽略长尾内容。
+*   **生成模式受限**：目前大模型只能被动接收拼接好的超长字符串，容易产生幻觉或丢失细节。
+*   **扩展性不足**：系统目前是一个封闭环境，无法与外部系统（如浏览器截图、数据库查询等）进行交互。
 
 ## 3. 架构设计与提议方案 (Proposed Changes & Architecture)
 
-### 3.1 核心机制：Agent Loop（代理循环）
-将 `Generation.vue` 中的单次 API 调用改造为 `while` 循环交互。
-1.  **System Prompt** 告知大模型任务目标和 JSON Schema 格式，但不提供全量知识库。
-2.  向大模型提供一个工具（Tool）：`search_knowledge_base(query: string)`。
-3.  大模型根据需求，输出 `tool_calls`（例如先查询“系统包含哪些模块”，再分别查询“模块A的具体功能”）。
-4.  前端执行本地检索逻辑，将检索结果以 `tool` 角色返回给大模型。
-5.  大模型收集齐所有信息后，输出最终的 JSON 字符串。
+### 3.1 核心机制一：开放式工具管理模块 (Tool Management)
+新增一个“工具/插件管理”页面 (`Tools.vue`)，允许用户维护系统可用的工具：
+1.  **内置工具管理**：默认提供 `search_knowledge_base`（知识库检索）工具，用户可自行调整该工具的描述提示词（让大模型更懂如何使用它）。
+2.  **MCP 服务配置**：用户可在此页面配置 MCP 服务器（Model Context Protocol Servers）。例如配置基于 `puppeteer` 的截图 MCP 服务，或本地的 Python 脚本 MCP 服务。系统将自动连接并读取这些服务暴露的 Tools 列表。
 
-### 3.2 工具定义与本地检索引擎
-由于系统是纯前端架构，知识库内容存储在本地，我们将实现一个轻量的**前端文本分块与检索算法**：
-*   **分块 (Chunking)**：在用户点击生成时，将选中的知识库 `content` 按换行符 `\n\n` 或特定长度切割成多个文本块 (Chunks)。
-*   **检索 (Retrieval)**：当 AI 传入 `query`（如“虚拟拆装系统的功能”）时，系统对 `query` 进行分词，并使用简单的 TF-IDF 或关键字命中率算法，从 Chunks 中筛选出得分最高的前 N 个文本块返回给 AI。
+### 3.2 核心机制二：MCP Client 深度集成
+由于 Web 浏览器沙盒限制，MCP Client 将运行在 Electron 的 Node.js 主进程中（通过 IPC 与前端通信）：
+*   **主进程 (`electron/main.ts`)**：集成官方的 `@modelcontextprotocol/sdk`，负责启动、连接和管理用户配置的各类 MCP 服务器（支持 stdio 方式运行本地命令）。
+*   **预加载 (`preload.ts`)**：提供 `get-mcp-tools` 和 `call-mcp-tool` 等接口供 Vue 前端调用。
 
-### 3.3 Prompt 提示词重构
-*   **去除全量注入**：Prompt 中不再包含 `${kbContent}`。
-*   **赋予主动性**：在 Prompt 中增加指令：“你现在需要生成一份复杂的结构化文档。请务必先使用 `search_knowledge_base` 工具查询总体的模块列表，然后再针对每个模块查询其包含的功能用例和详细信息。在确认收集完毕所有必要信息前，请不断调用工具进行探索。只有当所有数据准备就绪时，才输出最终的 JSON 数据。”
+### 3.3 核心机制三：动态 Agent 交互循环 (Agent Loop)
+重构 `Generation.vue` 中的生成逻辑，改为多轮对话的 Agent 架构：
+1.  **收集可用工具**：在生成前，向系统获取【内置知识库检索工具】+【MCP服务器提供的所有工具】，并转换为 OpenAI 标准的 `tools` 数组结构。
+2.  **开始 Agent Loop**：
+    *   发送 System Prompt（包含文档生成任务目标和 JSON Schema）给大模型。
+    *   大模型返回响应：
+        *   **如果是 `tool_calls`**：判断工具名称。若是知识库检索，由前端执行本地分块检索；若是 MCP 工具，则通过 IPC 转发给 Electron 主进程的 MCP Client 执行。获取结果后，将结果追加到对话记录中，重新请求大模型。
+        *   **如果是正常文本/JSON**：代表信息收集完毕，大模型已输出最终文档数据，跳出循环。
 
 ### 3.4 涉及修改的文件
-1.  **`src/views/Generation.vue`**:
-    *   重构 `generateDoc` 方法，加入 OpenAI 的 `tools` 定义。
-    *   实现 Agent 交互 `while` 循环处理逻辑。
-    *   实现本地轻量级检索函数（如 `localKBSearch(content, query)`）。
+*   **`src/views/Tools.vue` (新增)**: 用户工具和 MCP 服务管理界面。
+*   **`src/router/index.ts` & `src/App.vue`**: 添加入口菜单。
+*   **`electron/main.ts`**: 引入 MCP Client 核心逻辑，管理服务器生命周期，新增对应的 IPC Handlers。
+*   **`src/utils/bridge.ts`**: 新增工具相关的接口桥接方法。
+*   **`src/views/Generation.vue`**: 重构 `generateDoc` 方法，实现上述的 Agent `while` 循环逻辑。
 
 ## 4. 假设与决策 (Assumptions & Decisions)
-*   **模型兼容性**：该方案强烈依赖于支持 `Function Calling / Tools` 能力的大模型（如 OpenAI GPT-4o / GPT-3.5-turbo，DeepSeek 等新模型均支持）。用户配置的 API 必须支持此特性。
-*   **本地检索性能**：考虑到桌面端知识库一般为几万字级别的说明文档，纯 JS 进行正则/关键字匹配性能完全足够，无需引入复杂的向量数据库（Vector DB）。
+*   **兼容性降级**：当以纯 Web 模式 (`npm run dev --host`) 运行时，MCP Client 无法启动本地子进程，此时系统将优雅降级，仅提供纯前端支持的内置工具（如本地知识库检索），MCP 相关的工具将被隐藏。
+*   **MCP 标准化**：采用标准的 Model Context Protocol，这意味着未来不仅可以接入“截图”服务，任何社区开源的 MCP 插件（如 GitHub、数据库查询、文件读取等）都可以直接无缝接入本项目。
 
 ## 5. 验证步骤 (Verification Steps)
-1.  **检索测试**：单独调用 `localKBSearch` 函数，传入关键字，验证是否能准确返回知识库中的相关段落。
-2.  **交互流测试**：在开发者工具 Console 中打印 AI 的消息记录，验证大模型是否发起了正确的 `tool_calls` 请求。
-3.  **结果测试**：对比全量注入模式，验证通过 Function Calling 生成的 JSON 是否更加详尽，是否彻底解决了“只提取一个功能”的遗漏问题。
+1.  **工具页面测试**：在“工具管理”页面添加一个测试 MCP 服务，验证系统能否成功解析出该服务提供的 Tools 列表。
+2.  **内置 Agent 测试**：在不配置外部工具的情况下，测试大模型能否自主调用 `search_knowledge_base` 多次，提取出知识库中的所有功能点并生成 JSON。
+3.  **MCP 联动测试**：配置一个简单的外部 MCP 工具（如返回当前时间的假服务），在文档生成的 Prompt 中要求大模型获取当前时间，观察 Agent 是否能成功跨进程调用 MCP 工具并将结果渲染进文档。

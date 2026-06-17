@@ -160,3 +160,36 @@ export async function saveGeneratedDocument(buffer: ArrayBuffer | Uint8Array, de
     return true
   }
 }
+
+// MCP / Tools Bridge
+export async function connectMcpServer(id: string, command: string, args: string[]): Promise<boolean> {
+  if (isElectron) {
+    return await window.ipcRenderer.invoke('connect-mcp-server', { id, command, args })
+  } else {
+    console.warn('MCP Server is not supported in pure web environment.')
+    return false
+  }
+}
+
+export async function getMcpTools(id: string): Promise<any[]> {
+  if (isElectron) {
+    return await window.ipcRenderer.invoke('get-mcp-tools', id)
+  } else {
+    return []
+  }
+}
+
+export async function callMcpTool(id: string, name: string, args: any): Promise<any> {
+  if (isElectron) {
+    return await window.ipcRenderer.invoke('call-mcp-tool', { id, name, args })
+  } else {
+    throw new Error('MCP tools are not available in web mode.')
+  }
+}
+
+export async function disconnectMcpServer(id: string): Promise<boolean> {
+  if (isElectron) {
+    return await window.ipcRenderer.invoke('disconnect-mcp-server', id)
+  }
+  return true
+}

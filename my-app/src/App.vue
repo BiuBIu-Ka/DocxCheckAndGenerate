@@ -19,6 +19,10 @@
           <el-icon><Files /></el-icon>
           <span>模板与规则</span>
         </el-menu-item>
+        <el-menu-item index="/tools">
+          <el-icon><Connection /></el-icon>
+          <span>工具与插件</span>
+        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>模型配置</span>

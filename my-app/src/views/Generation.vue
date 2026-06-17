@@ -93,7 +93,7 @@ import { ElMessage } from 'element-plus'
 import OpenAI from 'openai'
 import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
-import { getSettings, getTemplateBuffer, saveGeneratedDocument } from '../utils/bridge'
+import { getSettings, getTemplateBuffer, saveGeneratedDocument, connectMcpServer, getMcpTools, callMcpTool } from '../utils/bridge'
 
 const globalContext = ref('')
 const referenceMaterials = ref('')
@@ -124,6 +124,26 @@ const loadSettings = async () => {
   } catch (error) {
     console.error('Failed to load settings', error)
   }
+}
+
+function localKbSearch(content: string, query: string) {
+  if (!content) return "知识库为空"
+  const chunks = content.split('\n\n').filter(c => c.trim().length > 0)
+  const keywords = query.split(/\s+/).filter(k => k.trim())
+  if (keywords.length === 0) return "请输入搜索关键字"
+  
+  const scored = chunks.map(chunk => {
+    let score = 0
+    for (const kw of keywords) {
+      if (chunk.toLowerCase().includes(kw.toLowerCase())) score++
+    }
+    return { chunk, score }
+  })
+  
+  scored.sort((a, b) => b.score - a.score)
+  const best = scored.filter(s => s.score > 0).slice(0, 5).map(s => s.chunk)
+  if (best.length === 0) return "未在知识库中找到相关内容"
+  return best.join('\n\n---\n\n')
 }
 
 const generateDoc = async () => {
@@ -163,15 +183,19 @@ const generateDoc = async () => {
       .join('\n')
 
     const selectedKb = knowledgeBases.value.find(k => k.id === selectedKbId.value)
-    const kbContent = selectedKb ? `【引用的核心知识库文档内容】：\n${selectedKb.content}\n\n` : ''
+    const kbContent = selectedKb ? selectedKb.content : ''
 
     const prompt = `
-你是一个专业的文档生成助手。你需要根据【全局系统背景】、【引用的核心知识库文档内容】、【补充参考资料】和【整体规则】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
+你是一个专业的文档生成助手。你需要根据【全局系统背景】、【补充参考资料】和【整体规则】，生成一段符合【数据结构要求】的纯 JSON 格式数据。
 请不要输出任何 markdown 标记（如 \`\`\`json ），仅输出合法的 JSON 字符串本身！
 
-【🚨 核心提取指令（非常重要）】：
-请务必【全面、详尽】地提取知识库和参考资料中提到的【所有】功能点、模块和相关信息！
-绝对不要只提取一个或进行简单摘要。资料中包含多少个功能点，你的 JSON 数组中就必须生成多少个对应的对象项。不能遗漏任何一个功能模块！
+【🚨 核心指令（非常重要）】：
+你目前还没有获得知识库的全部内容。请务必使用工具（如 search_knowledge_base）去多次搜索和探索！
+1. 先搜索总体的模块列表。
+2. 然后针对每个模块，搜索其包含的详细功能点。
+3. 如果还有 MCP 外部工具，也可以视需要调用。
+4. 请【全面、详尽】地提取所有功能点，绝对不要只提取一个或进行简单摘要。
+只有当你认为已经收集齐所有信息时，才输出最终的 JSON 字符串。
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
 如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。
@@ -189,27 +213,110 @@ ${appSettings.standardText || '无'}
 【本次注意事项】：
 ${notes.value || '无'}
 
-【参考资料】：
-${kbContent}
 【补充参考资料（用户手动输入）】：
 ${referenceMaterials.value || '无'}
 `
 
-    // Step 2: Request AI
+    // Step 2: Request AI (Agent Loop)
     currentStep.value = 2
+    
+    // 准备工具列表
+    const openAiTools: any[] = []
+    if (kbContent) {
+      openAiTools.push({
+        type: "function",
+        function: {
+          name: "search_knowledge_base",
+          description: appSettings.builtinKbDescription || "用于从本地知识库中根据关键字搜索相关的文本片段。当你需要获取系统功能细节时，必须调用此工具。",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "搜索关键字，如'通用管理系统包含哪些功能'" }
+            },
+            required: ["query"]
+          }
+        }
+      })
+    }
+
+    const activeMcpTools: any[] = []
+    if (appSettings.mcpServers) {
+      for (const server of appSettings.mcpServers) {
+        try {
+          await connectMcpServer(server.id, server.command, server.args)
+          const tools = await getMcpTools(server.id)
+          for (const tool of tools) {
+            activeMcpTools.push({ serverId: server.id, tool })
+            openAiTools.push({
+              type: "function",
+              function: {
+                name: tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64),
+                description: tool.description,
+                parameters: tool.inputSchema
+              }
+            })
+          }
+        } catch (e) {
+          console.warn('Failed to setup MCP server', server.name)
+        }
+      }
+    }
+
     const openai = new OpenAI({
       baseURL: appSettings.apiUrl,
       apiKey: appSettings.apiKey,
       dangerouslyAllowBrowser: true // Web 端兼容必须开启
     })
 
-    const completion = await openai.chat.completions.create({
-      messages: [{ role: "user", content: prompt }],
-      model: appSettings.modelName,
-      temperature: 0.7,
-    })
+    let messages: any[] = [{ role: "user", content: prompt }]
+    let jsonStr = ''
+    let loopCount = 0
 
-    let jsonStr = completion.choices[0].message.content || '{}'
+    while (loopCount < 20) {
+      loopCount++
+      const reqPayload: any = {
+        messages,
+        model: appSettings.modelName,
+        temperature: 0.7,
+      }
+      if (openAiTools.length > 0) {
+        reqPayload.tools = openAiTools
+      }
+
+      const completion = await openai.chat.completions.create(reqPayload)
+      const msg = completion.choices[0].message
+      messages.push(msg)
+
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        for (const toolCall of msg.tool_calls as any[]) {
+          let toolResult = ""
+          if (toolCall.function.name === 'search_knowledge_base') {
+            const args = JSON.parse(toolCall.function.arguments)
+            toolResult = localKbSearch(kbContent, args.query)
+          } else {
+            // Find MCP server
+            const mcpItem = activeMcpTools.find(t => t.tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64) === toolCall.function.name)
+            if (mcpItem) {
+               try {
+                   const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
+                   toolResult = JSON.stringify(res)
+               } catch(e: any) { toolResult = "Error: " + e.message }
+            } else {
+               toolResult = "Tool not found"
+            }
+          }
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: toolCall.function.name,
+            content: toolResult
+          })
+        }
+      } else {
+        jsonStr = msg.content || '{}'
+        break
+      }
+    }
     // Clean up potential markdown formatting
     jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim()
     
