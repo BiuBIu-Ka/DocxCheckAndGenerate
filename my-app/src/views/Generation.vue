@@ -340,38 +340,135 @@ function inspectRenderData(value: any) {
   return stats
 }
 
-// 深合并函数：将 partialData 合并进 rawDocumentData 中。如果遇到数组，则将新项追加到原数组中。
-function mergePartialData(target: any, source: any, path = 'root') {
-  if (typeof target !== 'object' || target === null) return source
-  if (typeof source !== 'object' || source === null) return source
+function isPlainObject(value: any) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
-  if (Array.isArray(target) && Array.isArray(source)) {
-    return safeAppendArray(target, source, path)
-  }
+function mergeObjectFields(target: any, source: any): any {
+  if (!isPlainObject(target) || !isPlainObject(source)) return source
 
-  if (Array.isArray(target) !== Array.isArray(source)) {
-    return source
-  }
-
-  for (const key in source) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
-
+  for (const key of Object.keys(source)) {
     const sourceVal = source[key]
     const targetVal = target[key]
-    const nextPath = `${path}.${key}`
-
-    if (Array.isArray(targetVal) && Array.isArray(sourceVal)) {
-      safeAppendArray(targetVal, sourceVal, nextPath)
-    } else if (
-      typeof targetVal === 'object' && targetVal !== null && !Array.isArray(targetVal) &&
-      typeof sourceVal === 'object' && sourceVal !== null && !Array.isArray(sourceVal)
-    ) {
-      target[key] = mergePartialData(targetVal, sourceVal, nextPath)
+    if (isPlainObject(targetVal) && isPlainObject(sourceVal)) {
+      target[key] = mergeObjectFields(targetVal, sourceVal)
     } else {
+      // 通用策略下，数组默认整段替换，避免污染和重复膨胀
       target[key] = sourceVal
     }
   }
+
   return target
+}
+
+function parsePatchPath(path: string): Array<string | number> {
+  const normalized = (path || '').trim().replace(/^root\.?/, '')
+  if (!normalized) return []
+
+  const tokens: Array<string | number> = []
+  const regex = /([^[.\]]+)|\[(\d+)\]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(normalized)) !== null) {
+    if (match[1] !== undefined) tokens.push(match[1])
+    if (match[2] !== undefined) tokens.push(Number(match[2]))
+  }
+  return tokens
+}
+
+function getContainerByNextToken(nextToken: string | number | undefined) {
+  return typeof nextToken === 'number' ? [] : {}
+}
+
+function applyPatchOperation(
+  root: Record<string, any>,
+  operation: 'replace' | 'merge' | 'append',
+  path: string,
+  value: any,
+) {
+  const segments = parsePatchPath(path)
+
+  if (segments.length === 0) {
+    if (operation === 'append') {
+      throw new Error('根路径不支持 append，请指定到具体数组字段')
+    }
+    if (operation === 'replace') {
+      return typeof value === 'object' && value !== null ? value : { value }
+    }
+    return mergeObjectFields(root, value)
+  }
+
+  let current: any = root
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segment = segments[i]
+    const nextToken = segments[i + 1]
+
+    if (typeof segment === 'number') {
+      if (!Array.isArray(current)) {
+        throw new Error(`路径 ${path} 非法：索引 ${segment} 的父节点不是数组`)
+      }
+      if (current[segment] === undefined || current[segment] === null || typeof current[segment] !== 'object') {
+        current[segment] = getContainerByNextToken(nextToken)
+      }
+      current = current[segment]
+    } else {
+      if (!isPlainObject(current)) {
+        throw new Error(`路径 ${path} 非法：字段 ${segment} 的父节点不是对象`)
+      }
+      if (current[segment] === undefined || current[segment] === null || typeof current[segment] !== 'object') {
+        current[segment] = getContainerByNextToken(nextToken)
+      }
+      current = current[segment]
+    }
+  }
+
+  const leaf = segments[segments.length - 1]
+  const getLeafValue = () => (typeof leaf === 'number' ? current[leaf] : current[leaf])
+  const setLeafValue = (nextValue: any) => {
+    if (typeof leaf === 'number') {
+      if (!Array.isArray(current)) {
+        throw new Error(`路径 ${path} 非法：末尾索引 ${leaf} 的父节点不是数组`)
+      }
+      current[leaf] = nextValue
+    } else {
+      if (!isPlainObject(current)) {
+        throw new Error(`路径 ${path} 非法：末尾字段 ${leaf} 的父节点不是对象`)
+      }
+      current[leaf] = nextValue
+    }
+  }
+
+  const existing = getLeafValue()
+
+  if (operation === 'replace') {
+    setLeafValue(value)
+    return root
+  }
+
+  if (operation === 'merge') {
+    if (!isPlainObject(value)) {
+      throw new Error('merge 操作只接受对象 value')
+    }
+    if (existing === undefined) {
+      setLeafValue(value)
+      return root
+    }
+    if (!isPlainObject(existing)) {
+      throw new Error(`路径 ${path} 当前不是对象，不能执行 merge`)
+    }
+    setLeafValue(mergeObjectFields(existing, value))
+    return root
+  }
+
+  const appendValue = Array.isArray(value) ? value : [value]
+  if (existing === undefined) {
+    setLeafValue([])
+  }
+  const nextExisting = getLeafValue()
+  if (!Array.isArray(nextExisting)) {
+    throw new Error(`路径 ${path} 当前不是数组，不能执行 append`)
+  }
+  safeAppendArray(nextExisting, appendValue, path)
+  return root
 }
 
 const generateDoc = async () => {
@@ -422,14 +519,24 @@ const generateDoc = async () => {
 
 【🚨 终极核心指令（解决长文本生成的关键）】：
 由于最终的文档可能非常巨大，你 **绝对不要** 在最后一次性输出完整的 JSON 数据！
-请采取“边搜索，边提交”的策略：
-1. 先搜索并整理某个模块的数据。
-2. 每次提交时，尽量提交“一个完整模块”或“一批完整功能点”，不要拆得过碎。
-3. 调用 \`submit_partial_data\` 工具时，只提交“新增数据增量”，绝对不要重复提交之前已经提交过的数据。
-4. 如果字段是数组，新提交的数据会自动追加到末尾，所以不要把历史完整数组反复重发。
-5. 单次提交不要过大，请控制在一个模块或一批功能点，不要一次提交整份文档。
+请采取“边搜索，边提交 patch”的策略：
+1. 每次提交必须使用 \`submit_partial_data\`，并明确给出 \`operation\`、\`path\`、\`value\`。
+2. 默认优先使用 \`replace\`：当你拿到了某个数组或字段的最新完整结果，就直接 replace 该路径。
+3. 只有当你 **明确知道** 某个路径是“新增列表项”时，才使用 \`append\`。
+4. 当你只想补充对象里的部分字段时，才使用 \`merge\`。
+5. 严禁把整棵 JSON 树反复提交；每次只提交一个明确 path 的局部 patch。
 6. 每个文本字段请尽量精炼，通常不要超过 2000 字，严禁把原始资料整段照搬进单个字段。
-7. 当你确信所有模块和所有所需数据都已经提交完毕后，请调用 \`finish_generation\` 工具结束流程。
+7. 单次提交不要过大，请控制在一个模块或一批功能点。
+8. 当你确信所有模块和所有所需数据都已经全部提交完毕后，请调用 \`finish_generation\` 工具结束流程。
+
+【Patch 协议说明】：
+- operation = replace: 用 value 整体替换 path 对应的字段，这是默认首选模式。
+- operation = merge: 仅用于对象，按字段递归合并；数组在 merge 中会整体替换，不会追加。
+- operation = append: 仅用于数组，表示只向该数组追加新增项。
+- path 示例：
+  - "apps"
+  - "apps[0].models"
+  - "apps[0].models[0].functions"
 
 【数据结构要求（即模板中的变量，请根据这些变量名生成对应的键值对）】：
 如果变量名有 "#" 前缀，表示这是一个数组（例如列表或多个功能点）。每次提交局部数据时，请保持这个结构，只填充当前搜集到的部分。
@@ -476,14 +583,26 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
       type: "function",
       function: {
         name: "submit_partial_data",
-        description: "提交局部生成的 JSON 数据。只提交新增增量，不要重复提交历史数据。如果字段是数组，新提交的数据会自动追加到现有数组末尾。",
+        description: "按 patch 协议提交局部数据。必须提供 operation、path、value。默认优先使用 replace；只有明确新增数组项时才使用 append。",
         parameters: {
           type: "object",
           properties: {
-            data: { type: "string", description: "局部的 JSON 数据字符串，务必保证其格式符合【数据结构要求】" },
+            operation: {
+              type: "string",
+              enum: ["replace", "merge", "append"],
+              description: "写入方式。默认优先 replace。"
+            },
+            path: {
+              type: "string",
+              description: "要写入的数据路径，例如 apps、apps[0].models、apps[0].models[0].functions"
+            },
+            value: {
+              type: ["object", "array", "string", "number", "boolean", "null"],
+              description: "写入到 path 的 JSON 值。"
+            },
             progress: { type: "string", description: "当前进度说明，如'已完成通信模块的生成'" }
           },
-          required: ["data"]
+          required: ["operation", "path", "value"]
         }
       }
     })
@@ -528,7 +647,7 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
     let messages: any[] = [{ role: "user", content: prompt }]
     let loopCount = 0
     let isFinished = false
-    const seenPartialPayloads = new Set<string>()
+    const seenPatchSignatures = new Set<string>()
 
     while (loopCount < 40 && !isFinished) {
       loopCount++
@@ -554,22 +673,27 @@ ${kbContent ? '\n【关联的知识库内容】（通过 search_knowledge_base �
           try {
             if (toolCall.function.name === 'submit_partial_data') {
               const args = JSON.parse(toolCall.function.arguments)
-              const payload = String(args.data || '')
+              const operation = (args.operation || 'replace') as 'replace' | 'merge' | 'append'
+              const path = String(args.path || '').trim()
+              const patchValue = args.value
+              const payload = stableStringify({ operation, path, value: patchValue })
+
               if (payload.length > 500000) {
-                toolResult = '错误：单次提交数据过大（超过 500KB），请分批提交。'
-              } else if (seenPartialPayloads.has(payload)) {
-                toolResult = '检测到重复提交的局部数据，已忽略。请只提交新增增量。'
+                toolResult = '错误：单次 patch 数据过大（超过 500KB），请继续拆分。'
+              } else if (seenPatchSignatures.has(payload)) {
+                toolResult = '检测到重复 patch，已忽略。请不要重复提交同一路径的相同内容。'
               } else {
-                seenPartialPayloads.add(payload)
-                const partialData = JSON.parse(payload)
-                mergePartialData(rawDocumentData, partialData)
+                seenPatchSignatures.add(payload)
+                const nextRoot = applyPatchOperation(rawDocumentData, operation, path, patchValue)
+                if (nextRoot !== rawDocumentData) {
+                  rawDocumentData = nextRoot
+                }
                 submitCount.value += 1
-                // 降低摘要更新频率，每 2 次提交更新一次摘要
                 if (submitCount.value % 2 === 0) {
                   documentSummary.value = summarizeDocumentData(rawDocumentData)
                 }
-                appendGenerationLog(args.progress || `已完成第 ${submitCount.value} 次局部提交`)
-                toolResult = `成功接收增量数据。累计提交 ${submitCount.value} 次。`
+                appendGenerationLog(`${operation} ${path || 'root'} ${args.progress || ''}`.trim())
+                toolResult = `Patch 已应用成功。operation=${operation}; path=${path || 'root'}; 累计提交 ${submitCount.value} 次。`
               }
             } else if (toolCall.function.name === 'finish_generation') {
               isFinished = true
