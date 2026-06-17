@@ -199,17 +199,12 @@ function trimMessageContent(content: string, maxLength = 4000) {
 }
 
 function compactMessages(messages: any[]) {
-  if (messages.length <= 24) return messages
-
-  const head = messages.slice(0, 6)
-  const tail = messages.slice(-18).map((msg) => {
+  return messages.map((msg) => {
     if (typeof msg?.content === 'string') {
       return { ...msg, content: trimMessageContent(msg.content) }
     }
     return msg
   })
-
-  return [...head, ...tail]
 }
 
 const MAX_ARRAY_ITEMS = 5000
