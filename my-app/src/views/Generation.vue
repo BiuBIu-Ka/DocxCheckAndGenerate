@@ -94,6 +94,7 @@ import OpenAI from 'openai'
 import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
 import { getSettings, getTemplateBuffer, saveGeneratedDocument, connectMcpServer, getMcpTools, callMcpTool } from '../utils/bridge'
+import { InternalToolManager } from '../utils/internalTools'
 
 const globalContext = ref('')
 const referenceMaterials = ref('')
@@ -124,26 +125,6 @@ const loadSettings = async () => {
   } catch (error) {
     console.error('Failed to load settings', error)
   }
-}
-
-function localKbSearch(content: string, query: string) {
-  if (!content) return "知识库为空"
-  const chunks = content.split('\n\n').filter(c => c.trim().length > 0)
-  const keywords = query.split(/\s+/).filter(k => k.trim())
-  if (keywords.length === 0) return "请输入搜索关键字"
-  
-  const scored = chunks.map(chunk => {
-    let score = 0
-    for (const kw of keywords) {
-      if (chunk.toLowerCase().includes(kw.toLowerCase())) score++
-    }
-    return { chunk, score }
-  })
-  
-  scored.sort((a, b) => b.score - a.score)
-  const best = scored.filter(s => s.score > 0).slice(0, 5).map(s => s.chunk)
-  if (best.length === 0) return "未在知识库中找到相关内容"
-  return best.join('\n\n---\n\n')
 }
 
 const generateDoc = async () => {
@@ -222,19 +203,18 @@ ${referenceMaterials.value || '无'}
     
     // 准备工具列表
     const openAiTools: any[] = []
-    if (kbContent) {
+    
+    // Load Internal Tools
+    const activeInternalTools = await InternalToolManager.getActiveTools()
+    for (const tool of activeInternalTools) {
+      // search_knowledge_base only makes sense if kbContent exists, 
+      // but to keep it extensible, we always provide it, it will just return empty if no KB selected.
       openAiTools.push({
         type: "function",
         function: {
-          name: "search_knowledge_base",
-          description: appSettings.builtinKbDescription || "用于从本地知识库中根据关键字搜索相关的文本片段。当你需要获取系统功能细节时，必须调用此工具。",
-          parameters: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "搜索关键字，如'通用管理系统包含哪些功能'" }
-            },
-            required: ["query"]
-          }
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters
         }
       })
     }
@@ -243,7 +223,7 @@ ${referenceMaterials.value || '无'}
     if (appSettings.mcpServers) {
       for (const server of appSettings.mcpServers) {
         try {
-          await connectMcpServer(server.id, server.command, server.args)
+          await connectMcpServer(server.id, server.command, server.args, server.env)
           const tools = await getMcpTools(server.id)
           for (const tool of tools) {
             activeMcpTools.push({ serverId: server.id, tool })
@@ -290,21 +270,29 @@ ${referenceMaterials.value || '无'}
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         for (const toolCall of msg.tool_calls as any[]) {
           let toolResult = ""
-          if (toolCall.function.name === 'search_knowledge_base') {
-            const args = JSON.parse(toolCall.function.arguments)
-            toolResult = localKbSearch(kbContent, args.query)
+          
+          // Check Internal Tools first
+          const internalTool = activeInternalTools.find(t => t.name === toolCall.function.name)
+          if (internalTool) {
+            try {
+              const args = JSON.parse(toolCall.function.arguments)
+              toolResult = await InternalToolManager.execute(internalTool, args, { kbContent })
+            } catch (e: any) {
+              toolResult = "Internal Tool Error: " + e.message
+            }
           } else {
-            // Find MCP server
+            // Check MCP tools
             const mcpItem = activeMcpTools.find(t => t.tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64) === toolCall.function.name)
             if (mcpItem) {
                try {
                    const res = await callMcpTool(mcpItem.serverId, mcpItem.tool.name, JSON.parse(toolCall.function.arguments))
                    toolResult = JSON.stringify(res)
-               } catch(e: any) { toolResult = "Error: " + e.message }
+               } catch(e: any) { toolResult = "MCP Tool Error: " + e.message }
             } else {
                toolResult = "Tool not found"
             }
           }
+
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,

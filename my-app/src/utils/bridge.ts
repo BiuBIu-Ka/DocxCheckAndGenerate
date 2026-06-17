@@ -162,9 +162,9 @@ export async function saveGeneratedDocument(buffer: ArrayBuffer | Uint8Array, de
 }
 
 // MCP / Tools Bridge
-export async function connectMcpServer(id: string, command: string, args: string[]): Promise<boolean> {
+export async function connectMcpServer(id: string, command: string, args: string[], env?: Record<string, string>): Promise<boolean> {
   if (isElectron) {
-    return await window.ipcRenderer.invoke('connect-mcp-server', { id, command, args })
+    return await window.ipcRenderer.invoke('connect-mcp-server', { id, command, args, env })
   } else {
     console.warn('MCP Server is not supported in pure web environment.')
     return false

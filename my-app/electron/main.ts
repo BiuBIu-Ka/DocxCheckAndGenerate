@@ -102,13 +102,14 @@ ipcMain.handle('save-file', (_, { filePath, buffer }) => {
 // MCP Handlers
 const activeMcpClients: Record<string, Client> = {}
 
-ipcMain.handle('connect-mcp-server', async (_, { id, command, args }) => {
+ipcMain.handle('connect-mcp-server', async (_, { id, command, args, env }) => {
   try {
     if (activeMcpClients[id]) {
       await activeMcpClients[id].close()
       delete activeMcpClients[id]
     }
-    const transport = new StdioClientTransport({ command, args })
+    const transportEnv = env ? { ...process.env, ...env } : process.env;
+    const transport = new StdioClientTransport({ command, args, env: transportEnv as any })
     const client = new Client(
       { name: "my-app-mcp-client", version: "1.0.0" },
       { capabilities: { tools: {} } }
